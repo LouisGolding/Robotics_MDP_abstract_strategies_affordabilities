@@ -5,9 +5,28 @@
 Research codebase for a Master's thesis investigating whether **abstract
 strategies** and **affordances** reduce planning cost in a stochastic
 navigation MDP.  The core hypothesis: by reasoning at a coarser level of
-abstraction (macro-actions, strategies) and by filtering implausible actions
-before search (affordances), the planner should need fewer decisions, fewer
+abstraction (macro-actions, strategies) and by using affordance scores to
+select applicable strategies, the planner should need fewer decisions, fewer
 replans, and less wall-clock time than a primitive-action baseline.
+
+**What affordances are here.**  An affordance is a *predictive score* of how
+beneficial a given strategy is from the current state — it defines a
+strategy's basin of attraction and is used to rank and select which strategies
+are applicable.  Our contribution adds a **reliability dimension** to this
+score: not just "how useful is this strategy?" but "how reliably can it be
+grounded and executed under transition uncertainty?"  Affordances do *not*
+filter primitive actions before search; they operate at the strategy-selection
+level, above the MCTS planner.
+
+**What the three evaluation conditions are.**  All three use the *same* MCTS
+inner planner and the *same* online outer loop.  Only the set of available
+moves differs:
+
+| Condition | Available moves | What changes |
+|-----------|----------------|--------------|
+| MDP alone | Primitive door actions | Baseline — MCTS over raw actions |
+| + Macro-actions | Primitive + macro-actions (options) | Coarser action space |
+| + Strategies + Affordances | Macro-actions, guided by affordance-ranked strategies | Strategy selection biases MCTS expansion |
 
 ---
 
@@ -35,19 +54,19 @@ replanning loop** (Yoon, Fern & Givan, ICAPS 2007):
 
 ```
 while not at goal:
-    plan ← InnerPlanner.plan(current_state, env)
+    plan ← MCTSPlanner.plan(current_state, env)   # inner planner = MCTS/UCT
     if plan is None: give up
-    execute plan[1]                    # one step only
+    execute plan[1]                                 # one step only
     observe outcome (success / locked)
-    if door locked: replan             # loop back, plan from new state
+    if door locked: replan                          # loop back, plan from new state
 ```
 
-Advantages over offline value iteration here:
+Advantages over offline value iteration for this setting:
 - The available-action set changes as doors lock → full-policy computation
   would need to be repeated; the online loop handles this naturally.
 - Scales to large maps without enumerating all states.
-- Clean separation: the outer loop never changes; only the inner planner
-  is swapped between experimental conditions.
+- Clean separation: the outer loop never changes; only the available moves
+  passed to the inner planner differ between experimental conditions.
 
 **Reference**: Yoon, S., Fern, A. & Givan, R. (2007). *FF-Replan: A baseline
 for probabilistic planning.* ICAPS 2007.
@@ -61,18 +80,18 @@ produced via the `InnerPlanner` abstract interface:
 
 ```
 InnerPlanner  (abstract)
-├── ReliablePathPlanner   ← Phase 1  (scaffolding baseline)
-└── MCTSPlanner           ← Phase 2+ (target algorithm)
+├── ReliablePathPlanner   ← scaffolding / validation oracle ONLY (not an eval condition)
+└── MCTSPlanner           ← the planner used in ALL three experimental conditions
 ```
 
-**All three experimental conditions** (primitives / +macro-actions /
-+strategies) share the **same outer loop and inner planner interface**.
-Only the set of available moves passed to the inner planner differs.
+**All three experimental conditions** share the **same MCTSPlanner and the
+same outer loop**.  Only the set of available moves passed to the planner
+differs.
 
-### Current inner planner: ReliablePathPlanner (scaffolding)
+### Scaffolding oracle: ReliablePathPlanner
 
-Dijkstra on edge weights `−log(p)` (Dijkstra, 1959).  The shortest path
-under these weights maximises cumulative success probability.
+Dijkstra on edge weights `−log(p)` (Dijkstra, 1959).  Finds the
+most-reliable (maximum cumulative success probability) path exactly.
 
 ```
 weight(u→v) = −log(p_uv)
@@ -80,22 +99,42 @@ most-reliable path = Dijkstra shortest path
 cumulative prob    = exp(−total_weight) = ∏ p_i
 ```
 
-Returns the path only if cumulative prob ≥ α (confidence threshold).
-This is **scaffolding** — a correct, simple baseline that validates the
-online loop end-to-end on small maps.  It is not the thesis contribution.
+**Role**: validation oracle only.  Used in unit tests to verify that
+`MCTSPlanner` converges to the same path on small maps where the exact
+optimum is known.  It is **not** one of the three evaluation conditions and
+does not appear in thesis results.
 
 **Reference**: Dijkstra, E. W. (1959). A note on two problems in connexion
 with graphs. *Numerische Mathematik*, 1(1), 269–271.
 
-### Target inner planner: MCTS/UCT (Phase 2+)
+### Evaluation inner planner: MCTSPlanner / UCT
 
-Monte Carlo Tree Search with UCB1 (Kocsis & Szepesvári, ECML 2006).  From
-the current state, UCT builds a partial lookahead tree via rollouts, trading
-off exploration vs. exploitation.  In later phases, abstract strategies will
-bias tree expansion, reducing the number of rollouts required.
+Monte Carlo Tree Search with UCB1 (UCT; Kocsis & Szepesvári, ECML 2006).
+From the current state, UCT builds a partial lookahead tree via repeated
+rollouts, balancing exploration vs. exploitation.
+
+- **Condition 1 (MDP alone):** MCTS over primitive door actions.
+- **Condition 2 (+macro-actions):** MCTS over primitive + macro-action moves.
+- **Condition 3 (+strategies + affordances):** MCTS expansion biased by
+  affordance-ranked strategies; the affordance score (utility × reliability)
+  determines which strategies are offered as candidate moves.
 
 **Reference**: Kocsis, L. & Szepesvári, C. (2006). Bandit based Monte-Carlo
 planning. *ECML 2006*, LNCS vol 4212.
+
+### Affordances (Condition 3)
+
+An affordance associates a state with a *ranked list of applicable
+strategies* scored on two dimensions:
+
+1. **Utility** — how beneficial is this strategy from the current state
+   (its basin of attraction; follows Khen's deterministic formulation).
+2. **Reliability** — how likely is the strategy to be successfully grounded
+   and executed under stochastic transitions (our novel contribution).
+
+The combined affordance score determines which strategies are passed to the
+MCTS planner as candidate macro-moves.  This is **not** action filtering;
+it is strategy-level selection operating above the planner.
 
 ---
 
@@ -103,11 +142,11 @@ planning. *ECML 2006*, LNCS vol 4212.
 
 | Phase | Content | Status |
 |-------|---------|--------|
-| 1 | GridWorld env + online loop + ReliablePathPlanner (scaffolding) | ✅ Done |
-| 2 | Macro-actions / options + MCTSPlanner inner planner | ⬜ Next |
-| 3 | Abstract strategies (bias MCTS expansion) | ⬜ |
-| 4 | Affordance module (filter actions before planning) | ⬜ |
-| 5 | Evaluation: compare all conditions | ⬜ |
+| 1 | GridWorld env + online loop + ReliablePathPlanner oracle | ✅ Done |
+| 2 | MCTSPlanner (UCT) + primitive actions — "MDP alone" baseline; validate against Dijkstra oracle | ⬜ Next |
+| 3 | Macro-actions / options — second evaluation condition | ⬜ |
+| 4 | Abstract strategies + affordance scores (utility × reliability) — third condition | ⬜ |
+| 5 | Evaluation: three-way comparison across all conditions | ⬜ |
 
 ---
 
@@ -123,16 +162,16 @@ Robotics_MDP_abstract_strategies_affordabilities/
 │   ├── __init__.py              # Public API
 │   ├── environment.py           # GridWorld, DoorProbabilitySpec (Phase 1)
 │   ├── planner.py               # InnerPlanner interface
-│   │                            #   ReliablePathPlanner  (Phase 1 scaffolding)
+│   │                            #   ReliablePathPlanner  (oracle, Phase 1)
 │   │                            #   OnlineReplanningAgent (outer loop, all phases)
-│   │                            #   MCTSPlanner          (Phase 2, TODO)
-│   ├── macro_actions.py         # Macro-actions / options (Phase 2)
-│   ├── strategies.py            # Abstract strategy policies (Phase 3)
-│   └── affordances.py           # Affordance filtering (Phase 4)
+│   │                            #   MCTSPlanner          (Phase 2 — all eval conditions)
+│   ├── macro_actions.py         # Macro-actions / options (Phase 3)
+│   ├── strategies.py            # Abstract strategy policies (Phase 4)
+│   └── affordances.py           # Affordance scoring: utility × reliability (Phase 4)
 │
 └── tests/
     ├── __init__.py
-    └── test_baseline.py         # Phase 1: 5 experiments, prints metrics
+    └── test_baseline.py         # Phase 1: oracle validation experiments
 ```
 
 ---
@@ -145,11 +184,12 @@ Robotics_MDP_abstract_strategies_affordabilities/
 2. **Separation of concerns** — `GridWorld` owns stochastic transitions;
    `OnlineReplanningAgent` owns the outer loop; `InnerPlanner` owns search.
 
-3. **Swappable inner planner** — `ReliablePathPlanner` → `MCTSPlanner` is a
-   one-line swap; the outer loop, environment, and metrics are unchanged.
+3. **MCTS is the single evaluation planner** — `ReliablePathPlanner` is an
+   oracle for testing only.  All three conditions use `MCTSPlanner`; only
+   the available move set differs.
 
-4. **Shared loop across conditions** — primitive / macro-action / strategy
-   conditions all use `OnlineReplanningAgent`; only the available moves differ.
+4. **Affordances operate above the planner** — they rank strategies, not
+   primitive actions.  The reliability dimension is the novel contribution.
 
 5. **Reproducibility** — every `GridWorld` and agent call accepts a `seed`.
 
