@@ -2,27 +2,100 @@
 
 ## Project Overview
 
-Research codebase implementing an MDP-based navigation framework that uses
-**abstract strategies** and **affordances** to improve planning efficiency.
-The key idea: instead of planning purely over primitive actions, the agent
-reasons about macro-level *strategies* (sequences of actions that achieve
-sub-goals) and uses *affordances* (perceptual signals about what actions are
-available/viable) to prune the search space.
+Research codebase for a Master's thesis investigating whether **abstract
+strategies** and **affordances** reduce planning cost in a stochastic
+navigation MDP.  The core hypothesis: by reasoning at a coarser level of
+abstraction (macro-actions, strategies) and by filtering implausible actions
+before search (affordances), the planner should need fewer decisions, fewer
+replans, and less wall-clock time than a primitive-action baseline.
 
 ---
 
-## Research Motivation
+## Problem Formulation
 
-Standard MDP planners replan from scratch on every failure. This is expensive
-when the environment has many stochastic doors and long paths. The hypothesis is
-that:
+**Stochastic Shortest-Path MDP** (Bertsekas & Tsitsiklis, 1991):
 
-1. **Macro-actions / options** allow the planner to reason at a coarser
-   granularity, reducing the branching factor.
-2. **Abstract strategies** (goal-conditioned policies over macro-actions)
-   further compress the plan representation.
-3. **Affordances** allow the agent to filter out actions that are implausible
-   *before* running the search, cutting planning time.
+| Component   | Definition |
+|-------------|------------|
+| States S    | Rooms — graph nodes (row, col) |
+| Actions A   | Attempt a door to an adjacent room |
+| Transition  | Door (s→s') opens with prob p ∈ (0,1]; on failure the door is **permanently closed** for this episode |
+| Cost        | 1 per action (unit step cost) |
+| Goal        | Reach any node in G ⊆ S |
+
+The permanently-closing door is the key stochastic element: the agent learns
+about transition availability only by attempting it.
+
+---
+
+## Solver: Online Plan-Act-Observe-Replan
+
+We do **NOT** compute a full offline policy.  Instead we use an **online
+replanning loop** (Yoon, Fern & Givan, ICAPS 2007):
+
+```
+while not at goal:
+    plan ← InnerPlanner.plan(current_state, env)
+    if plan is None: give up
+    execute plan[1]                    # one step only
+    observe outcome (success / locked)
+    if door locked: replan             # loop back, plan from new state
+```
+
+Advantages over offline value iteration here:
+- The available-action set changes as doors lock → full-policy computation
+  would need to be repeated; the online loop handles this naturally.
+- Scales to large maps without enumerating all states.
+- Clean separation: the outer loop never changes; only the inner planner
+  is swapped between experimental conditions.
+
+**Reference**: Yoon, S., Fern, A. & Givan, R. (2007). *FF-Replan: A baseline
+for probabilistic planning.* ICAPS 2007.
+
+---
+
+## Architecture: Swappable Inner Planner
+
+The outer loop (`OnlineReplanningAgent`) is decoupled from how plans are
+produced via the `InnerPlanner` abstract interface:
+
+```
+InnerPlanner  (abstract)
+├── ReliablePathPlanner   ← Phase 1  (scaffolding baseline)
+└── MCTSPlanner           ← Phase 2+ (target algorithm)
+```
+
+**All three experimental conditions** (primitives / +macro-actions /
++strategies) share the **same outer loop and inner planner interface**.
+Only the set of available moves passed to the inner planner differs.
+
+### Current inner planner: ReliablePathPlanner (scaffolding)
+
+Dijkstra on edge weights `−log(p)` (Dijkstra, 1959).  The shortest path
+under these weights maximises cumulative success probability.
+
+```
+weight(u→v) = −log(p_uv)
+most-reliable path = Dijkstra shortest path
+cumulative prob    = exp(−total_weight) = ∏ p_i
+```
+
+Returns the path only if cumulative prob ≥ α (confidence threshold).
+This is **scaffolding** — a correct, simple baseline that validates the
+online loop end-to-end on small maps.  It is not the thesis contribution.
+
+**Reference**: Dijkstra, E. W. (1959). A note on two problems in connexion
+with graphs. *Numerische Mathematik*, 1(1), 269–271.
+
+### Target inner planner: MCTS/UCT (Phase 2+)
+
+Monte Carlo Tree Search with UCB1 (Kocsis & Szepesvári, ECML 2006).  From
+the current state, UCT builds a partial lookahead tree via rollouts, trading
+off exploration vs. exploitation.  In later phases, abstract strategies will
+bias tree expansion, reducing the number of rollouts required.
+
+**Reference**: Kocsis, L. & Szepesvári, C. (2006). Bandit based Monte-Carlo
+planning. *ECML 2006*, LNCS vol 4212.
 
 ---
 
@@ -30,11 +103,11 @@ that:
 
 | Phase | Content | Status |
 |-------|---------|--------|
-| 1 | Environment + baseline primitive-action MDP planner | ✅ Done |
-| 2 | Macro-actions / options (hallway traversal, room sweep) | ⬜ Todo |
-| 3 | Abstract strategies (goal-conditioned strategy policies) | ⬜ Todo |
-| 4 | Affordance module (filter unavailable/implausible actions) | ⬜ Todo |
-| 5 | Evaluation & comparison across conditions | ⬜ Todo |
+| 1 | GridWorld env + online loop + ReliablePathPlanner (scaffolding) | ✅ Done |
+| 2 | Macro-actions / options + MCTSPlanner inner planner | ⬜ Next |
+| 3 | Abstract strategies (bias MCTS expansion) | ⬜ |
+| 4 | Affordance module (filter actions before planning) | ⬜ |
+| 5 | Evaluation: compare all conditions | ⬜ |
 
 ---
 
@@ -42,17 +115,20 @@ that:
 
 ```
 Robotics_MDP_abstract_strategies_affordabilities/
-├── CLAUDE.md                    # This file
+├── CLAUDE.md                    # This file — project guide & design notes
 ├── README.md
 ├── requirements.txt             # networkx, matplotlib, numpy
 │
 ├── mdp_nav/                     # Core library
-│   ├── __init__.py
-│   ├── environment.py           # GridWorld: graph-based grid-world (Phase 1)
-│   ├── planner.py               # MDPPlanner: baseline online replanning (Phase 1)
+│   ├── __init__.py              # Public API
+│   ├── environment.py           # GridWorld, DoorProbabilitySpec (Phase 1)
+│   ├── planner.py               # InnerPlanner interface
+│   │                            #   ReliablePathPlanner  (Phase 1 scaffolding)
+│   │                            #   OnlineReplanningAgent (outer loop, all phases)
+│   │                            #   MCTSPlanner          (Phase 2, TODO)
 │   ├── macro_actions.py         # Macro-actions / options (Phase 2)
 │   ├── strategies.py            # Abstract strategy policies (Phase 3)
-│   └── affordances.py           # Affordance filtering module (Phase 4)
+│   └── affordances.py           # Affordance filtering (Phase 4)
 │
 └── tests/
     ├── __init__.py
@@ -61,42 +137,36 @@ Robotics_MDP_abstract_strategies_affordabilities/
 
 ---
 
-## Phase 1 Design Details
+## Key Design Principles
 
-### Environment (`mdp_nav/environment.py`)
+1. **Online only** — the outer loop replans from the current state after each
+   action.  No full offline policy is computed.
 
-- **`GridWorld`** — graph-based grid-world backed by `networkx.Graph`.
-  - Rooms = nodes `(row, col)`; doors = edges with attribute `prob` ∈ (0,1].
-  - On `step(target)`: samples Bernoulli(prob); on failure the door is
-    permanently closed (`failed_doors` set) for this episode.
-  - `reset()` clears `failed_doors` and returns agent to `start`.
-  - `available_doors(node)` returns `[(neighbour, prob), ...]` for open doors.
-  - `render_text()` — ASCII grid. `render_matplotlib()` — networkx drawing.
-  - `cluster_size > 1` tiles the world with modular `cs×cs` sub-grids plus
-    bridge edges, enabling repeatable substructures.
+2. **Separation of concerns** — `GridWorld` owns stochastic transitions;
+   `OnlineReplanningAgent` owns the outer loop; `InnerPlanner` owns search.
 
-- **`DoorProbabilitySpec`** — priority-based prob assignment:
-  1. `per_door` dict (canonical edge key)
-  2. `default` fallback
+3. **Swappable inner planner** — `ReliablePathPlanner` → `MCTSPlanner` is a
+   one-line swap; the outer loop, environment, and metrics are unchanged.
 
-### Planner (`mdp_nav/planner.py`)
+4. **Shared loop across conditions** — primitive / macro-action / strategy
+   conditions all use `OnlineReplanningAgent`; only the available moves differ.
 
-- **`MDPPlanner`** — online replanning, primitive actions only.
-  - Enumerates all simple paths to any goal (via `nx.all_simple_paths`).
-  - Scores paths by cumulative product of edge probs (ignoring failed doors).
-  - Picks highest-prob path with prob ≥ α; executes first action; replans on failure.
-  - Tracks `actions_taken`, `replans`, `reached_goal` per episode.
+5. **Reproducibility** — every `GridWorld` and agent call accepts a `seed`.
 
-### Test Script (`tests/test_baseline.py`)
+---
 
-Five experiments:
-1. 5×5 uniform p=0.8
-2. 5×5 uniform p=0.5, alpha=0.3
-3. 5×5 with bottleneck corridor (per-door overrides)
-4. 6×6 clustered (3×3 tiles)
-5. 8×8 uniform p=0.85, alpha=0.6
+## Key References
 
-Each prints: success rate, avg replans, avg actions.
+- Bertsekas, D. P. & Tsitsiklis, J. N. (1991). An analysis of stochastic
+  shortest path problems. *Mathematics of Operations Research*, 16(3).
+- Dijkstra, E. W. (1959). A note on two problems in connexion with graphs.
+  *Numerische Mathematik*, 1(1), 269–271.
+- Kocsis, L. & Szepesvári, C. (2006). Bandit based Monte-Carlo planning.
+  *ECML 2006*, LNCS vol 4212.
+- Koenig, S. & Likhachev, M. (2002). D* Lite. *AAAI 2002*.
+- Puterman, M. L. (1994). *Markov Decision Processes*. Wiley.
+- Yoon, S., Fern, A. & Givan, R. (2007). FF-Replan: A baseline for
+  probabilistic planning. *ICAPS 2007*.
 
 ---
 
@@ -106,14 +176,3 @@ Each prints: success rate, avg replans, avg actions.
 pip install -r requirements.txt
 python tests/test_baseline.py
 ```
-
----
-
-## Key Design Principles
-
-- **Separation of concerns**: environment owns stochastic transitions;
-  planner owns search strategy. Later phases will add strategy/affordance layers
-  *without* modifying the environment.
-- **Reproducibility**: every `GridWorld` and `MDPPlanner` call accepts a `seed`.
-- **Extensibility**: `MDPPlanner._best_path` is the natural extension point for
-  macro-action planning in Phase 2.
