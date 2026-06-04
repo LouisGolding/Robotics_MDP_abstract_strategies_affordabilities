@@ -122,19 +122,28 @@ rollouts, balancing exploration vs. exploitation.
 **Reference**: Kocsis, L. & Szepesvári, C. (2006). Bandit based Monte-Carlo
 planning. *ECML 2006*, LNCS vol 4212.
 
-### Affordances (Condition 3)
+### Affordances (Phase 5)
 
-An affordance associates a state with a *ranked list of applicable
-strategies* scored on two dimensions:
+An affordance is a **predictive score of how beneficial a stored strategy is
+from the current state**.  We maintain a library of strategies (road maps —
+sequences of states that worked before).  At each decision point the affordance
+module scores every candidate strategy and selects the best one(s) to bias
+MCTS tree expansion toward.  This defines each strategy's *basin of attraction*:
+the set of states from which that strategy is a good choice.
 
-1. **Utility** — how beneficial is this strategy from the current state
-   (its basin of attraction; follows Khen's deterministic formulation).
-2. **Reliability** — how likely is the strategy to be successfully grounded
-   and executed under stochastic transitions (our novel contribution).
+The affordance is represented as a small vector (lower = better, 0 ideal):
 
-The combined affordance score determines which strategies are passed to the
-MCTS planner as candidate macro-moves.  This is **not** action filtering;
-it is strategy-level selection operating above the planner.
+| Component | Meaning |
+|-----------|---------|
+| `start_aff` | Effort to reach the strategy's entry state from the current state |
+| `strategy_aff` | Effort to traverse / refine the strategy's road map |
+| `task_aff` | Remaining effort to the goal after the strategy completes |
+| `reliability_aff` | **Our contribution** — how likely the strategy can be grounded into real moves given that doors may be locked |
+
+Affordances do **not** filter or prune primitive door-actions.  They operate
+entirely at the strategy-selection level, above the MCTS planner.  The MCTS
+planner still decides how to execute the selected strategy via its normal
+tree search over available moves.
 
 ---
 
@@ -145,8 +154,9 @@ it is strategy-level selection operating above the planner.
 | 1 | GridWorld env + online loop + ReliablePathPlanner oracle | ✅ Done |
 | 2 | MCTSPlanner (UCT) + primitive actions — "MDP alone" baseline; validate against Dijkstra oracle | ⬜ Next |
 | 3 | Macro-actions / options — second evaluation condition | ⬜ |
-| 4 | Abstract strategies + affordance scores (utility × reliability) — third condition | ⬜ |
-| 5 | Evaluation: three-way comparison across all conditions | ⬜ |
+| 4 | Abstract strategies — third evaluation condition | ⬜ |
+| 5 | Affordance module — rank/select applicable strategies; add reliability score | ⬜ |
+| 6 | Evaluation: three-way comparison across all conditions | ⬜ |
 
 ---
 
@@ -167,7 +177,7 @@ Robotics_MDP_abstract_strategies_affordabilities/
 │   │                            #   MCTSPlanner          (Phase 2 — all eval conditions)
 │   ├── macro_actions.py         # Macro-actions / options (Phase 3)
 │   ├── strategies.py            # Abstract strategy policies (Phase 4)
-│   └── affordances.py           # Affordance scoring: utility × reliability (Phase 4)
+│   └── affordances.py           # Affordance scoring: rank/select strategies, incl. reliability (Phase 5)
 │
 └── tests/
     ├── __init__.py
