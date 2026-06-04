@@ -1,5 +1,44 @@
 # Robotics MDP Abstract Strategies & Affordabilities
 
+> **For Claude Code sessions** — canonical decisions in this section override everything below.
+
+## What this project is
+
+MSc thesis by Louis Golding, supervised by Dr. Khen Elimelech.
+
+We're extending abstract strategies and affordances (from Khen's published research on deterministic planning) into **non-deterministic / MDP environments**. We build on the *concepts* from the papers — we do NOT have access to their code. Everything here is our own implementation.
+
+**Core research question:** assuming we already have strategies, how do we integrate them into MDP planning so it becomes cheaper (fewer replans / lower total cost)?
+
+## Canonical decisions (if anything contradicts these, these win)
+
+**Environment.** Static, non-deterministic navigation with repeatable structure. Rooms connected by doors. Each door has a known open-probability. **One attempt per door** — no retries (retries would make the env dynamic). No keys. No temporally-extended goals. Goal = reach a target state with confidence ≥ α.
+
+**Approach.** Online MDP planning. We implement our own planner (MCTS-style, off-the-shelf is fine, need not be SOTA). We integrate strategy/affordance concepts from the papers into it. Plan → act → observe → replan. Strategies replace random expansion with experience-informed expansion.
+
+**Scope.** Strategies are assumed given (no grounding/reconstruction for now). Stay at task-level abstraction. Lifelong library is the vision but start with a fixed set.
+
+**Contribution.** (1) Qualitative: strategies under uncertainty — applying a strategy no longer guarantees reaching its end state. (2) Quantitative: extend the affordance vector with a **reliability score** (not just usefulness).
+
+**Evaluation.** Three-way comparison: MDP alone vs. MDP + macro-actions vs. MDP + abstract strategies. Success = fewer replans + lower total cost. Macro-actions (sequences of *actions*) are the middle comparison; strategies (sequences of *states*) are ours — with states we still know where we're going.
+
+## Key concepts (from the papers)
+
+- **Abstract strategy** = a road map (sequence of *states* in abstract space) + an abstraction key (projection/reconstruction functions). More general than macro-actions.
+- **Affordance** = predictive numeric vector estimating the benefit of using a strategy from the current state. Scores: start affordance (effort to reach strategy's first state), strategy affordance (effort to traverse the road map), task affordance (remaining effort to goal). We add: reliability affordance.
+- **ACSD** = abstraction-critical state detection. How strategies are extracted from a single execution trace.
+- **Two senses of "success probability"** — don't conflate: (1) probability a plan succeeds in the MDP (from transition probabilities), (2) probability a strategy can be grounded into actions (refine; if can't, abort and backtrack).
+
+## Full project log
+
+The detailed meeting notes, background, and changelog live in the Claude.ai project knowledge base (`PROJECT_LOG.md`). This file is the compact version for Claude Code sessions.
+
+## Development notes
+
+<!-- Append implementation decisions, algorithm choices, experiment parameters here as we go -->
+
+---
+
 ## Project Overview
 
 Research codebase for a Master's thesis investigating whether **abstract
