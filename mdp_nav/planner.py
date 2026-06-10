@@ -107,6 +107,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -513,8 +514,9 @@ class OnlineReplanningAgent:
     Metrics tracked per episode
     ---------------------------
     reached_goal  : bool
-    actions_taken : int  — total door attempts (including failed ones)
-    replans       : int  — number of times a door failure triggered replanning
+    actions_taken : int   — total door attempts (including failed ones)
+    replans       : int   — number of times a door failure triggered replanning
+    planning_time : float — total wall-clock seconds spent inside plan()
 
     Parameters
     ----------
@@ -536,6 +538,7 @@ class OnlineReplanningAgent:
         self.reached_goal: bool = False
         self.actions_taken: int = 0
         self.replans: int = 0
+        self.planning_time: float = 0.0
 
     def run_episode(self, verbose: bool = False) -> Dict:
         """
@@ -543,11 +546,13 @@ class OnlineReplanningAgent:
 
         Returns
         -------
-        dict with keys: reached_goal (bool), actions_taken (int), replans (int)
+        dict with keys: reached_goal (bool), actions_taken (int),
+                        replans (int), planning_time (float seconds)
         """
         self.reached_goal = False
         self.actions_taken = 0
         self.replans = 0
+        self.planning_time = 0.0
 
         while self.actions_taken < self.max_steps:
             current = self.env.current_node
@@ -556,7 +561,9 @@ class OnlineReplanningAgent:
                 self.reached_goal = True
                 break
 
+            t0 = time.perf_counter()
             plan = self.inner_planner.plan(self.env, current)
+            self.planning_time += time.perf_counter() - t0
 
             if plan is None:
                 if verbose:
@@ -586,6 +593,7 @@ class OnlineReplanningAgent:
             "reached_goal": self.reached_goal,
             "actions_taken": self.actions_taken,
             "replans": self.replans,
+            "planning_time": self.planning_time,
         }
 
 

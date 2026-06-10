@@ -191,11 +191,12 @@ tree search over available moves.
 | Phase | Content | Status |
 |-------|---------|--------|
 | 1 | GridWorld env + online loop + ReliablePathPlanner oracle | ✅ Done |
-| 2 | MCTSPlanner (UCT) + primitive actions — "MDP alone" baseline; validate against Dijkstra oracle | ⬜ Next |
-| 3 | Macro-actions / options — second evaluation condition | ⬜ |
+| 2 | MCTSPlanner (UCT) + primitive actions — "MDP alone" baseline; validate against Dijkstra oracle | ✅ Done |
+| 2b | Evaluation harness (`tests/evaluate.py`) — fixed benchmark maps, side-by-side comparison table | ✅ Done |
+| 3 | Macro-actions / options — second evaluation condition | ⬜ Next |
 | 4 | Abstract strategies — third evaluation condition | ⬜ |
 | 5 | Affordance module — rank/select applicable strategies; add reliability score | ⬜ |
-| 6 | Evaluation: three-way comparison across all conditions | ⬜ |
+| 6 | Final evaluation run across all conditions | ⬜ |
 
 ---
 
@@ -210,17 +211,26 @@ Robotics_MDP_abstract_strategies_affordabilities/
 ├── mdp_nav/                     # Core library
 │   ├── __init__.py              # Public API
 │   ├── environment.py           # GridWorld, DoorProbabilitySpec (Phase 1)
+│   │                            #   DoorProbabilitySpec: min_prob + per_door overrides
+│   │                            #   per-door probs drawn from Uniform[min_prob, 0.99]
 │   ├── planner.py               # InnerPlanner interface
 │   │                            #   ReliablePathPlanner  (oracle, Phase 1)
 │   │                            #   OnlineReplanningAgent (outer loop, all phases)
-│   │                            #   MCTSPlanner          (Phase 2 — all eval conditions)
+│   │                            #     tracks: reached_goal, actions_taken,
+│   │                            #             replans, planning_time
+│   │                            #   MCTSPlanner / UCT    (Phase 2 — all eval conditions)
 │   ├── macro_actions.py         # Macro-actions / options (Phase 3)
 │   ├── strategies.py            # Abstract strategy policies (Phase 4)
 │   └── affordances.py           # Affordance scoring: rank/select strategies, incl. reliability (Phase 5)
 │
 └── tests/
     ├── __init__.py
-    └── test_baseline.py         # Phase 1: oracle validation experiments
+    ├── test_baseline.py         # Phase 1: ReliablePathPlanner smoke tests
+    ├── test_mcts.py             # Phase 2: MCTSPlanner validation + episode experiments
+    └── evaluate.py              # PRIMARY EVALUATION — three-way comparison table
+                                 #   CONDITIONS registry: add Phase 3/4/5 conditions here
+                                 #   BENCHMARK_MAPS: 4 fixed maps, seeded, reproducible
+                                 #   Metrics: success rate, avg replans, avg actions, planning time
 ```
 
 ---
@@ -263,5 +273,41 @@ Robotics_MDP_abstract_strategies_affordabilities/
 
 ```bash
 pip install -r requirements.txt
-python tests/test_baseline.py
+
+# Smoke tests (fast)
+python tests/test_baseline.py   # Phase 1: ReliablePathPlanner oracle
+python tests/test_mcts.py       # Phase 2: MCTSPlanner validation
+
+# Primary evaluation — three-way comparison table (~2 min)
+python tests/evaluate.py
 ```
+
+## Evaluation harness (`tests/evaluate.py`)
+
+This is the primary tool for the thesis results.  It runs all active
+conditions on a fixed set of 4 benchmark maps and prints a comparison table:
+
+```
+Map : 5×5  easy   (min_prob=0.75)   (100 episodes each)
+──────────────────────────────────────────────────────────────────
+Condition                    Success   Replans   Actions   Plan(s)
+──────────────────────────────────────────────────────────────────
+MDP alone (primitive)          88.0%      2.42     17.44     0.294
++ Macro-actions               TBD        TBD       TBD       TBD     ← Phase 3
++ Strategies                  TBD        TBD       TBD       TBD     ← Phase 4+5
+──────────────────────────────────────────────────────────────────
+```
+
+**To add a new condition** (Phases 3/4/5): implement a factory function
+`(env: GridWorld) -> OnlineReplanningAgent` and append it to the
+`CONDITIONS` list in `evaluate.py`.  Nothing else needs to change.
+
+**Benchmark maps** are fixed seeds so every condition sees the same doors
+and the same per-door probabilities.  Door probabilities are drawn from
+`Uniform[min_prob, 0.99]` — heterogeneous and realistic, not uniform.
+
+**Metrics:**
+- `Success` — % of episodes where the agent reached the goal
+- `Replans` — avg number of times a door failure forced replanning
+- `Actions` — avg total door attempts (including failed ones)
+- `Plan(s)` — avg total wall-clock time spent inside `plan()` per episode
