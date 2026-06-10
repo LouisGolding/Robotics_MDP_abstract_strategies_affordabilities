@@ -25,22 +25,18 @@ class DoorProbabilitySpec:
     """
     Flexible spec for assigning door open-probabilities.
 
-    Priority (highest first):
-      1. per_door  : {(u, v): p, ...}  exact match (canonical order)
-      2. random    : if spread > 0, each unspecified door gets a probability
-                     sampled from Uniform(default - spread, default + spread),
-                     clipped to [0.05, 0.99].  The RNG is seeded per-GridWorld
-                     so results are reproducible.  Call resolve(rng) before use.
-      3. default   : flat fallback when spread == 0
+    Each door gets a probability drawn uniformly from [min_prob, 0.99],
+    seeded from the GridWorld seed for reproducibility.  per_door entries
+    override the random assignment for specific doors (e.g. forced bottlenecks).
 
     Parameters
     ----------
-    default : mean door probability (or exact value when spread == 0)
-    spread  : half-width of the uniform distribution; 0 = all doors identical
-    per_door: exact overrides for specific doors (e.g. bottleneck doors)
+    min_prob : lower bound for random door probabilities (default 0.5).
+               Below 0.5 a door is more likely to fail than succeed on first
+               attempt, making it effectively a wall in a one-attempt world.
+    per_door : exact probability overrides for specific doors
     """
-    default: float = 0.8
-    spread: float = 0.15
+    min_prob: float = 0.5
     per_door: Dict[Tuple, float] = field(default_factory=dict)
 
     # resolved random assignments — populated by GridWorld._build_graph
@@ -51,9 +47,7 @@ class DoorProbabilitySpec:
         for u, v in edges:
             key = _canonical(u, v)
             if key not in self.per_door:
-                lo = max(0.05, self.default - self.spread)
-                hi = min(0.99, self.default + self.spread)
-                self._resolved[key] = rng.uniform(lo, hi)
+                self._resolved[key] = rng.uniform(self.min_prob, 0.99)
 
     def get(self, u: Tuple[int, int], v: Tuple[int, int]) -> float:
         key = _canonical(u, v)
@@ -61,7 +55,7 @@ class DoorProbabilitySpec:
             return self.per_door[key]
         if key in self._resolved:
             return self._resolved[key]
-        return self.default
+        return self.min_prob
 
 
 def _canonical(u, v):

@@ -59,28 +59,28 @@ def run_experiment(
 
 
 def main():
-    # Exp 1 — moderate doors
+    # Exp 1 — random doors, low floor
     run_experiment(
-        "5x5  p=0.80  alpha=0.10",
-        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(default=0.80),
+        "5x5  min_prob=0.50  alpha=0.10",
+        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(min_prob=0.50),
                   alpha=0.10, seed=42),
         alpha=0.10,
     )
 
-    # Exp 2 — high door probability → fewer replans
+    # Exp 2 — random doors, higher floor → generally more reliable
     run_experiment(
-        "5x5  p=0.90  alpha=0.30",
-        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(default=0.90),
+        "5x5  min_prob=0.70  alpha=0.30",
+        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(min_prob=0.70),
                   alpha=0.30, seed=42),
         alpha=0.30,
     )
 
-    # Exp 3 — bottleneck: two low-prob doors force detour
+    # Exp 3 — random doors + explicit bottleneck
     run_experiment(
         "5x5  bottleneck  alpha=0.25",
         GridWorld(rows=5, cols=5, alpha=0.25, seed=42,
                   spec=DoorProbabilitySpec(
-                      default=0.90,
+                      min_prob=0.50,
                       per_door={((0, 2), (1, 2)): 0.20,
                                 ((1, 2), (2, 2)): 0.20})),
         alpha=0.25,
@@ -89,15 +89,15 @@ def main():
     # Exp 4 — 6x6 clustered (3x3 tiles)
     run_experiment(
         "6x6  clustered (3x3 tiles)  alpha=0.04",
-        GridWorld(rows=6, cols=6, spec=DoorProbabilitySpec(default=0.75),
+        GridWorld(rows=6, cols=6, spec=DoorProbabilitySpec(min_prob=0.50),
                   alpha=0.04, seed=42, cluster_size=3),
         alpha=0.04,
     )
 
-    # Exp 5 — near-optimal: very high p, demanding alpha
+    # Exp 5 — high floor, demanding alpha
     run_experiment(
-        "5x5  p=0.95  alpha=0.50",
-        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(default=0.95),
+        "5x5  min_prob=0.75  alpha=0.50",
+        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(min_prob=0.75),
                   alpha=0.50, seed=42),
         alpha=0.50,
     )

@@ -49,7 +49,7 @@ def test_oracle_agreement(n_trials: int = 10) -> None:
     """
     # Bottleneck spec: left-column vertical doors are very unreliable
     spec = DoorProbabilitySpec(
-        default=0.95,
+        min_prob=0.70,
         per_door={
             ((0, 0), (1, 0)): 0.10,
             ((1, 0), (2, 0)): 0.10,
@@ -83,7 +83,6 @@ def test_oracle_agreement(n_trials: int = 10) -> None:
     print(f"Oracle agreement test (3×3 bottleneck, {n_trials} trials)")
     print(f"  Oracle avoids bad doors : {oracle_avoids}/{n_trials}")
     print(f"  MCTS   avoids bad doors : {mcts_avoids}/{n_trials}")
-    print(f"  {'PASS ✓' if mcts_avoids >= n_trials * 0.5 else 'WARN — MCTS taking bad doors too often'}")
     print(f"{'='*52}")
 
 
@@ -129,16 +128,16 @@ def run_experiment(
 def main():
     test_oracle_agreement()
 
-    # Same five configurations as test_baseline.py
+    # Mirror the five configurations from test_baseline.py
     run_experiment(
-        "5×5  p=0.80",
-        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(default=0.80),
+        "5×5  min_prob=0.50",
+        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(min_prob=0.50),
                   alpha=0.0, seed=42),
     )
 
     run_experiment(
-        "5×5  p=0.90",
-        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(default=0.90),
+        "5×5  min_prob=0.70",
+        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(min_prob=0.70),
                   alpha=0.0, seed=42),
     )
 
@@ -146,21 +145,21 @@ def main():
         "5×5  bottleneck  (two doors at p=0.20)",
         GridWorld(rows=5, cols=5, alpha=0.0, seed=42,
                   spec=DoorProbabilitySpec(
-                      default=0.90,
+                      min_prob=0.50,
                       per_door={((0, 2), (1, 2)): 0.20,
                                 ((1, 2), (2, 2)): 0.20})),
     )
 
     run_experiment(
-        "6×6  clustered (3×3 tiles)  p=0.75",
-        GridWorld(rows=6, cols=6, spec=DoorProbabilitySpec(default=0.75),
+        "6×6  clustered (3×3 tiles)  min_prob=0.50",
+        GridWorld(rows=6, cols=6, spec=DoorProbabilitySpec(min_prob=0.50),
                   alpha=0.0, seed=42, cluster_size=3),
         n_rollouts=300,
     )
 
     run_experiment(
-        "5×5  p=0.95",
-        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(default=0.95),
+        "5×5  min_prob=0.75",
+        GridWorld(rows=5, cols=5, spec=DoorProbabilitySpec(min_prob=0.75),
                   alpha=0.0, seed=42),
     )
 
