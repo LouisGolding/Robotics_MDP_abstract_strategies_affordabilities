@@ -27,14 +27,41 @@ class DoorProbabilitySpec:
 
     Priority (highest first):
       1. per_door  : {(u, v): p, ...}  exact match (canonical order)
-      2. default   : fallback for all unspecified doors
+      2. random    : if spread > 0, each unspecified door gets a probability
+                     sampled from Uniform(default - spread, default + spread),
+                     clipped to [0.05, 0.99].  The RNG is seeded per-GridWorld
+                     so results are reproducible.  Call resolve(rng) before use.
+      3. default   : flat fallback when spread == 0
+
+    Parameters
+    ----------
+    default : mean door probability (or exact value when spread == 0)
+    spread  : half-width of the uniform distribution; 0 = all doors identical
+    per_door: exact overrides for specific doors (e.g. bottleneck doors)
     """
     default: float = 0.8
+    spread: float = 0.15
     per_door: Dict[Tuple, float] = field(default_factory=dict)
+
+    # resolved random assignments — populated by GridWorld._build_graph
+    _resolved: Dict[Tuple, float] = field(default_factory=dict, repr=False)
+
+    def resolve(self, edges, rng: random.Random) -> None:
+        """Assign random probabilities to every edge not in per_door."""
+        for u, v in edges:
+            key = _canonical(u, v)
+            if key not in self.per_door:
+                lo = max(0.05, self.default - self.spread)
+                hi = min(0.99, self.default + self.spread)
+                self._resolved[key] = rng.uniform(lo, hi)
 
     def get(self, u: Tuple[int, int], v: Tuple[int, int]) -> float:
         key = _canonical(u, v)
-        return self.per_door.get(key, self.default)
+        if key in self.per_door:
+            return self.per_door[key]
+        if key in self._resolved:
+            return self._resolved[key]
+        return self.default
 
 
 def _canonical(u, v):
@@ -117,7 +144,46 @@ class GridWorld:
     # ------------------------------------------------------------------
 
     def _build_graph(self) -> None:
+        # Collect all edges first so spec.resolve() can assign probs in one pass
         cs = self.cluster_size
+        edge_set: List[Tuple] = []
+        if cs <= 1:
+            for r in range(self.rows):
+                for c in range(self.cols):
+                    node = (r, c)
+                    if c > 0:
+                        edge_set.append(_canonical(node, (r, c - 1)))
+                    if r > 0:
+                        edge_set.append(_canonical(node, (r - 1, c)))
+        else:
+            cluster_rows = self.rows // cs
+            cluster_cols = self.cols // cs
+            for cr in range(cluster_rows):
+                for cc in range(cluster_cols):
+                    for r in range(cs):
+                        for c in range(cs):
+                            node = (cr * cs + r, cc * cs + c)
+                            if c > 0:
+                                edge_set.append(_canonical(node, (cr * cs + r, cc * cs + c - 1)))
+                            if r > 0:
+                                edge_set.append(_canonical(node, (cr * cs + r - 1, cc * cs + c)))
+            for cr in range(cluster_rows):
+                for cc in range(cluster_cols - 1):
+                    for r in range(cs):
+                        u = (cr * cs + r, cc * cs + cs - 1)
+                        v = (cr * cs + r, (cc + 1) * cs)
+                        edge_set.append(_canonical(u, v))
+            for cr in range(cluster_rows - 1):
+                for cc in range(cluster_cols):
+                    for c in range(cs):
+                        u = (cr * cs + cs - 1, cc * cs + c)
+                        v = ((cr + 1) * cs, cc * cs + c)
+                        edge_set.append(_canonical(u, v))
+
+        # Resolve random probabilities using a dedicated seeded RNG
+        prob_rng = random.Random(self.seed)
+        self.spec.resolve(edge_set, prob_rng)
+
         if cs <= 1:
             _add_grid_cluster(self._base_graph,
                               self.rows, self.cols, 0, 0, self.spec)
