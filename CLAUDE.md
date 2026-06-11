@@ -196,10 +196,23 @@ tree search over available moves.
 | 1 | GridWorld env + online loop + ReliablePathPlanner oracle | ✅ Done |
 | 2 | MCTSPlanner (UCT) + primitive actions — "MDP alone" baseline; validate against Dijkstra oracle | ✅ Done |
 | 2b | Evaluation harness (`tests/evaluate.py`) — fixed benchmark maps, side-by-side comparison table | ✅ Done |
-| 3 | Macro-actions / options — second evaluation condition | ⬜ Next |
-| 4 | Abstract strategies — third evaluation condition | ⬜ |
+| 3 | Macro-actions / options — second evaluation condition (+ live web dashboard) | ✅ Done |
+| 4 | Abstract strategies — third evaluation condition | ⬜ Next |
 | 5 | Affordance module — rank/select applicable strategies; add reliability score | ⬜ |
 | 6 | Final evaluation run across all conditions | ⬜ |
+
+**Phase 3 finding (macro-actions).** Auto-generated corridor / room-crossing
+macros (`generate_macro_library`) are offered to the *same* MCTSPlanner as
+extra candidate moves; when the planner picks a macro the online loop commits
+to its whole road, replanning only if a door along the way fails.  This
+collapses several plan-act-replan cycles into one decision: across the four
+benchmark maps macros cut **planning decisions ~40-55 %** and **wall-clock
+planning time ~50-75 %**.  The cost is a 5-9 pt drop in success rate from
+committing blindly to long corridors — shorter macros (`max_macro_length`)
+trade fewer decision savings for better reliability (length-2 ≈ baseline
+success).  This reliability gap is exactly what Phase 4/5 strategies +
+reliability affordances are meant to close (a strategy knows *where* it is
+going, so it can be scored before commitment).
 
 ---
 
@@ -222,18 +235,30 @@ Robotics_MDP_abstract_strategies_affordabilities/
 │   │                            #     tracks: reached_goal, actions_taken,
 │   │                            #             replans, planning_time
 │   │                            #   MCTSPlanner / UCT    (Phase 2 — all eval conditions)
-│   ├── macro_actions.py         # Macro-actions / options (Phase 3)
+│   ├── macro_actions.py         # Macro-actions / options (Phase 3 ✅)
+│   │                            #   MacroAction, MacroActionLibrary
+│   │                            #   generate_macro_library(env): auto-build
+│   │                            #     corridor / room-crossing macros from topology
 │   ├── strategies.py            # Abstract strategy policies (Phase 4)
 │   └── affordances.py           # Affordance scoring: rank/select strategies, incl. reliability (Phase 5)
+│
+├── dashboard/                   # Live web dashboard (Phase 3)
+│   ├── app.py                   #   Flask + Flask-SocketIO; reuses the SAME
+│   │                            #   GridWorld / agent / MCTSPlanner as evaluate.py.
+│   │                            #   Drives animation via run_episode(step_callback=…)
+│   └── templates/index.html     #   SVG grid, door probs, locked-door + macro-road
+│                                #   highlighting, live metrics + results table
 │
 └── tests/
     ├── __init__.py
     ├── test_baseline.py         # Phase 1: ReliablePathPlanner smoke tests
     ├── test_mcts.py             # Phase 2: MCTSPlanner validation + episode experiments
-    └── evaluate.py              # PRIMARY EVALUATION — three-way comparison table
-                                 #   CONDITIONS registry: add Phase 3/4/5 conditions here
-                                 #   BENCHMARK_MAPS: 4 fixed maps, seeded, reproducible
-                                 #   Metrics: success rate, avg replans, avg actions, planning time
+    ├── evaluate.py              # PRIMARY EVALUATION — side-by-side comparison table
+    │                            #   CONDITIONS registry: add Phase 4/5 conditions here
+    │                            #   BENCHMARK_MAPS: 4 fixed maps, seeded, reproducible
+    │                            #   Metrics: success, replans, actions, decisions, planning time
+    └── visualise_benchmarks.py  # PNG figures: maps, sample episodes,
+                                 #   baseline + condition-comparison bar charts
 ```
 
 ---
@@ -281,8 +306,15 @@ pip install -r requirements.txt
 python tests/test_baseline.py   # Phase 1: ReliablePathPlanner oracle
 python tests/test_mcts.py       # Phase 2: MCTSPlanner validation
 
-# Primary evaluation — three-way comparison table (~2 min)
+# Primary evaluation — side-by-side comparison table (~2 min)
 python tests/evaluate.py
+
+# Benchmark figures (maps, sample episodes, comparison bar charts)
+python tests/visualise_benchmarks.py
+
+# Live web dashboard — animated episodes in the browser
+pip install flask flask-socketio       # if not already installed
+python dashboard/app.py                 # → http://127.0.0.1:5000
 ```
 
 ## Evaluation harness (`tests/evaluate.py`)
@@ -292,14 +324,19 @@ conditions on a fixed set of 4 benchmark maps and prints a comparison table:
 
 ```
 Map : 5×5  easy   (min_prob=0.75)   (100 episodes each)
-──────────────────────────────────────────────────────────────────
-Condition                    Success   Replans   Actions   Plan(s)
-──────────────────────────────────────────────────────────────────
-MDP alone (primitive)          88.0%      2.42     17.44     0.294
-+ Macro-actions               TBD        TBD       TBD       TBD     ← Phase 3
-+ Strategies                  TBD        TBD       TBD       TBD     ← Phase 4+5
-──────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────────
+Condition                    Success   Replans   Actions Decisions   Plan(s)
+────────────────────────────────────────────────────────────────────────────
+MDP alone (primitive)          88.0%      2.42     17.44     17.56     0.176
++ Macro-actions                83.0%      2.39     15.62      7.91     0.039  ← Phase 3
++ Strategies                  TBD        TBD       TBD       TBD       TBD     ← Phase 4+5
+────────────────────────────────────────────────────────────────────────────
 ```
+
+The **Decisions** column (number of `plan()` calls) is where macro-actions
+shine: committing to a macro road executes several primitive hops per planning
+decision, so decisions and planning time drop sharply even when raw action
+counts are similar.
 
 **To add a new condition** (Phases 3/4/5): implement a factory function
 `(env: GridWorld) -> OnlineReplanningAgent` and append it to the

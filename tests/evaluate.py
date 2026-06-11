@@ -41,7 +41,12 @@ from typing import Callable, Dict, List, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from mdp_nav import GridWorld, DoorProbabilitySpec, make_mcts_agent
+from mdp_nav import (
+    GridWorld,
+    DoorProbabilitySpec,
+    make_mcts_agent,
+    make_macro_agent,
+)
 from mdp_nav.planner import OnlineReplanningAgent
 
 
@@ -55,6 +60,7 @@ class ConditionResult:
     successes: int = 0
     total_replans: float = 0.0
     total_actions: float = 0.0
+    total_decisions: float = 0.0
     total_planning_time: float = 0.0
     n_episodes: int = 0
 
@@ -69,6 +75,10 @@ class ConditionResult:
     @property
     def avg_actions(self) -> float:
         return self.total_actions / self.n_episodes if self.n_episodes else 0.0
+
+    @property
+    def avg_decisions(self) -> float:
+        return self.total_decisions / self.n_episodes if self.n_episodes else 0.0
 
     @property
     def avg_planning_time(self) -> float:
@@ -135,9 +145,14 @@ def _condition_mcts_primitive(env: GridWorld) -> OnlineReplanningAgent:
     return make_mcts_agent(env, n_rollouts=MCTS_ROLLOUTS, seed=0)
 
 
+def _condition_mcts_macro(env: GridWorld) -> OnlineReplanningAgent:
+    """Condition 2: MCTSPlanner with auto-generated macro-actions (Phase 3)."""
+    return make_macro_agent(env, n_rollouts=MCTS_ROLLOUTS, seed=0)
+
+
 CONDITIONS: List[tuple] = [
     ("MDP alone (primitive)", _condition_mcts_primitive),
-    # ("+ Macro-actions",      _condition_mcts_macro),   # Phase 3
+    ("+ Macro-actions",       _condition_mcts_macro),         # Phase 3
     # ("+ Strategies",         _condition_mcts_strategies),  # Phase 4+5
 ]
 
@@ -163,6 +178,7 @@ def run_condition(
             result.successes += 1
         result.total_replans += ep_result["replans"]
         result.total_actions += ep_result["actions_taken"]
+        result.total_decisions += ep_result["decisions"]
         result.total_planning_time += ep_result["planning_time"]
 
     return result
@@ -176,11 +192,12 @@ def print_table(benchmark: BenchmarkMap, results: List[ConditionResult]) -> None
     col_w = 26
     num_w = 10
 
-    divider = "─" * (col_w + num_w * 4)
+    divider = "─" * (col_w + num_w * 5)
     header = (f"{'Condition':<{col_w}}"
               f"{'Success':>{num_w}}"
               f"{'Replans':>{num_w}}"
               f"{'Actions':>{num_w}}"
+              f"{'Decisions':>{num_w}}"
               f"{'Plan(s)':>{num_w}}")
 
     print(f"\n{'═' * len(divider)}")
@@ -194,6 +211,7 @@ def print_table(benchmark: BenchmarkMap, results: List[ConditionResult]) -> None
               f"{r.success_rate:>{num_w-1}.1f}%"
               f"{r.avg_replans:>{num_w}.2f}"
               f"{r.avg_actions:>{num_w}.2f}"
+              f"{r.avg_decisions:>{num_w}.2f}"
               f"{r.avg_planning_time:>{num_w}.3f}")
 
     print(divider)

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MDP Navigation — Live Dashboard</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2129; --ink: #e6edf3; --muted: #8b98a5;
+    --accent: #58a6ff; --macro: #c678dd; --ok: #3fb950; --bad: #f85149;
+    --line: #30363d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); font-size: 14px;
+  }
+  header {
+    padding: 14px 22px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .layout { display: flex; gap: 18px; padding: 18px 22px; align-items: flex-start; }
+  .stage { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; padding: 14px; }
+  .side { width: 380px; display: flex; flex-direction: column; gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 10px; padding: 14px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+             color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .row label { width: 92px; color: var(--muted); font-size: 12px; }
+  select, input[type=number] {
+    flex: 1; background: #0d1117; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 8px; font-size: 13px;
+  }
+  input[type=range] { flex: 1; }
+  button {
+    width: 100%; padding: 9px; border: 0; border-radius: 7px; cursor: pointer;
+    background: var(--accent); color: #04101f; font-weight: 700; font-size: 14px;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button.secondary { background: #21262d; color: var(--ink); border: 1px solid var(--line); }
+  .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .metric { background: #0d1117; border: 1px solid var(--line); border-radius: 8px;
+            padding: 8px 10px; }
+  .metric .k { color: var(--muted); font-size: 11px; }
+  .metric .v { font-size: 20px; font-weight: 700; margin-top: 2px; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 20px;
+           font-size: 11px; font-weight: 700; }
+  .badge.macro { background: rgba(198,120,221,.18); color: var(--macro); }
+  .badge.primitive { background: rgba(88,166,255,.18); color: var(--accent); }
+  .badge.run { background: rgba(63,185,80,.18); color: var(--ok); }
+  .badge.idle { background: #21262d; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: right; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; }
+  td.goal-yes { color: var(--ok); } td.goal-no { color: var(--bad); }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px;
+            font-size: 11px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .edge { transition: stroke .25s, stroke-width .25s; }
+  #agent { transition: cx .35s ease, cy .35s ease; }
+  .status-line { font-size: 12px; color: var(--muted); min-height: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Stochastic Navigation MDP</h1>
+  <span class="sub">online plan · act · observe · replan — primitive vs macro-actions</span>
+</header>
+
+<div class="layout">
+  <div class="stage">
+    <svg id="grid" width="640" height="640"></svg>
+    <div class="legend">
+      <span><span class="dot" style="background:hsl(120,70%,45%)"></span>reliable door</span>
+      <span><span class="dot" style="background:hsl(0,70%,45%)"></span>risky door</span>
+      <span><span class="dot" style="background:#6e7681"></span>locked door</span>
+      <span><span class="dot" style="background:#58a6ff"></span>agent</span>
+      <span><span class="dot" style="background:#3fb950"></span>goal</span>
+      <span><span class="dot" style="background:#c678dd"></span>committed macro road</span>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="card">
+      <h2>Controls</h2>
+      <div class="row">
+        <label>Map</label>
+        <select id="mapSel">
+          {% for m in maps %}<option value="{{ m.index }}">{{ m.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="row">
+        <label>Condition</label>
+        <select id="condSel">
+          {% for c in conditions %}<option value="{{ c.key }}">{{ c.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="row">
+        <label>Episode seed</label>
+        <input id="seed" type="number" value="0" min="0" />
+      </div>
+      <div class="row">
+        <label>Speed</label>
+        <input id="speed" type="range" min="0.05" max="1.2" step="0.05" value="0.4" />
+        <span id="speedVal" style="width:46px;text-align:right;color:var(--muted)">0.40s</span>
+      </div>
+      <button id="runBtn">▶ Run episode</button>
+    </div>
+
+    <div class="card">
+      <h2>Live episode</h2>
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <span id="condBadge" class="badge idle">idle</span>
+        <span id="runBadge" class="badge idle">waiting</span>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="k">Actions</div><div class="v" id="mActions">0</div></div>
+        <div class="metric"><div class="k">Replans</div><div class="v" id="mReplans">0</div></div>
+        <div class="metric"><div class="k">Decisions</div><div class="v" id="mDecisions">0</div></div>
+        <div class="metric"><div class="k">At room</div><div class="v" id="mPos" style="font-size:15px">—</div></div>
+      </div>
+      <div class="status-line" id="statusLine" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h2>Results (this session) <button id="clearBtn" class="secondary"
+           style="width:auto;padding:3px 9px;float:right;font-size:11px">clear</button></h2>
+      <table id="resTable">
+        <thead><tr>
+          <th>Condition</th><th>Goal</th><th>Act</th><th>Rep</th><th>Dec</th><th>Plan(s)</th>
+        </tr></thead>
+        <tbody id="resBody"></tbody>
+        <tfoot id="resFoot"></tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const socket = io();
+const SVG = "http://www.w3.org/2000/svg";
+const grid = document.getElementById("grid");
+let nodePos = {};      // id -> {x,y}
+let edgeEls = {};      // "a|b" canonical -> line element
+let goals = new Set();
+
+function probColor(p) { return `hsl(${Math.round(p * 120)},70%,45%)`; }
+function ekey(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
+
+// ---- render a fresh map -------------------------------------------------
+function renderMap(m) {
+  grid.innerHTML = "";
+  nodePos = {}; edgeEls = {}; goals = new Set(m.goals);
+
+  const step = Math.min(110, Math.floor(560 / Math.max(1, Math.max(m.rows, m.cols) - 1) ) || 110);
+  const margin = 50;
+  const w = margin * 2 + (m.cols - 1) * step;
+  const h = margin * 2 + (m.rows - 1) * step;
+  grid.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  grid.setAttribute("width", Math.min(640, w));
+  grid.setAttribute("height", Math.min(640, h));
+
+  m.nodes.forEach(n => {
+    nodePos[n.id] = { x: margin + n.c * step, y: margin + n.r * step };
+  });
+
+  // edges
+  m.edges.forEach(e => {
+    const a = nodePos[e.u], b = nodePos[e.v];
+    const line = document.createElementNS(SVG, "line");
+    line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+    line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
+    line.setAttribute("stroke", probColor(e.prob));
+    line.setAttribute("stroke-width", 4);
+    line.setAttribute("class", "edge");
+    line.dataset.prob = e.prob;
+    grid.appendChild(line);
+    edgeEls[ekey(e.u, e.v)] = line;
+
+    // probability label
+    const lbl = document.createElementNS(SVG, "text");
+    lbl.setAttribute("x", (a.x + b.x) / 2);
+    lbl.setAttribute("y", (a.y + b.y) / 2 - 3);
+    lbl.setAttribute("fill", "#8b98a5");
+    lbl.setAttribute("font-size", "10");
+    lbl.setAttribute("text-anchor", "middle");
+    lbl.textContent = e.prob.toFixed(2);
+    grid.appendChild(lbl);
+  });
+
+  // committed-plan road (drawn under nodes, updated each step)
+  const road = document.createElementNS(SVG, "polyline");
+  road.setAttribute("id", "planRoad");
+  road.setAttribute("fill", "none");
+  road.setAttribute("stroke", "#c678dd");
+  road.setAttribute("stroke-width", 9);
+  road.setAttribute("stroke-linecap", "round");
+  road.setAttribute("stroke-linejoin", "round");
+  road.setAttribute("opacity", "0");
+  grid.appendChild(road);
+
+  // nodes
+  m.nodes.forEach(n => {
+    const p = nodePos[n.id];
+    const circ = document.createElementNS(SVG, "circle");
+    circ.setAttribute("cx", p.x); circ.setAttribute("cy", p.y);
+    circ.setAttribute("r", 15);
+    const isGoal = goals.has(n.id);
+    circ.setAttribute("fill", isGoal ? "#3fb950" : "#21262d");
+    circ.setAttribute("stroke", "#30363d");
+    grid.appendChild(circ);
+
+    const t = document.createElementNS(SVG, "text");
+    t.setAttribute("x", p.x); t.setAttribute("y", p.y + 3);
+    t.setAttribute("fill", isGoal ? "#04101f" : "#8b98a5");
+    t.setAttribute("font-size", "9");
+    t.setAttribute("text-anchor", "middle");
+    t.textContent = isGoal ? "G" : n.id;
+    grid.appendChild(t);
+  });
+
+  // agent marker
+  const start = nodePos[m.start];
+  const agent = document.createElementNS(SVG, "circle");
+  agent.setAttribute("id", "agent");
+  agent.setAttribute("cx", start.x); agent.setAttribute("cy", start.y);
+  agent.setAttribute("r", 11);
+  agent.setAttribute("fill", "#58a6ff");
+  agent.setAttribute("stroke", "#04101f");
+  agent.setAttribute("stroke-width", 2);
+  grid.appendChild(agent);
+}
+
+function moveAgent(id) {
+  const p = nodePos[id], a = document.getElementById("agent");
+  if (p && a) { a.setAttribute("cx", p.x); a.setAttribute("cy", p.y); }
+}
+
+function drawPlanRoad(planIds, kind) {
+  const road = document.getElementById("planRoad");
+  if (!road) return;
+  const pts = planIds.map(id => nodePos[id]).filter(Boolean)
+                      .map(p => `${p.x},${p.y}`).join(" ");
+  road.setAttribute("points", pts);
+  road.setAttribute("stroke", kind === "macro" ? "#c678dd" : "#58a6ff");
+  road.setAttribute("opacity", planIds.length > 1 ? "0.35" : "0");
+}
+
+// ---- live metrics & controls -------------------------------------------
+const $ = id => document.getElementById(id);
+function setBadge(el, cls, txt) { el.className = "badge " + cls; el.textContent = txt; }
+
+$("speed").addEventListener("input", e =>
+  $("speedVal").textContent = (+e.target.value).toFixed(2) + "s");
+
+$("mapSel").addEventListener("change", () =>
+  socket.emit("preview", { map_index: +$("mapSel").value }));
+
+let running = false;
+$("runBtn").addEventListener("click", () => {
+  if (running) return;
+  socket.emit("run", {
+    map_index: +$("mapSel").value,
+    condition: $("condSel").value,
+    seed: +$("seed").value,
+    delay: +$("speed").value,
+  });
+});
+
+// ---- results table ------------------------------------------------------
+const agg = {};   // label -> {n, goals, act, rep, dec, plan}
+function addResult(d) {
+  const tb = $("resBody");
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td>${d.condition}</td>
+    <td class="${d.reached_goal ? 'goal-yes' : 'goal-no'}">${d.reached_goal ? '✓' : '✗'}</td>
+    <td>${d.actions_taken}</td><td>${d.replans}</td>
+    <td>${d.decisions}</td><td>${d.planning_time.toFixed(3)}</td>`;
+  tb.prepend(tr);
+
+  const a = agg[d.condition] || (agg[d.condition] = {n:0,goals:0,act:0,rep:0,dec:0,plan:0});
+  a.n++; a.goals += d.reached_goal ? 1 : 0;
+  a.act += d.actions_taken; a.rep += d.replans;
+  a.dec += d.decisions; a.plan += d.planning_time;
+  renderFoot();
+}
+function renderFoot() {
+  const ft = $("resFoot"); ft.innerHTML = "";
+  Object.entries(agg).forEach(([label, a]) => {
+    const tr = document.createElement("tr");
+    tr.style.color = "#e6edf3"; tr.style.fontWeight = "700";
+    tr.innerHTML = `<td>${label} avg (n=${a.n})</td>
+      <td>${(100*a.goals/a.n).toFixed(0)}%</td>
+      <td>${(a.act/a.n).toFixed(1)}</td><td>${(a.rep/a.n).toFixed(1)}</td>
+      <td>${(a.dec/a.n).toFixed(1)}</td><td>${(a.plan/a.n).toFixed(3)}</td>`;
+    ft.appendChild(tr);
+  });
+}
+$("clearBtn").addEventListener("click", () => {
+  $("resBody").innerHTML = ""; $("resFoot").innerHTML = "";
+  for (const k in agg) delete agg[k];
+});
+
+// ---- socket events ------------------------------------------------------
+socket.on("map", renderMap);
+
+socket.on("episode_start", d => {
+  running = true; $("runBtn").disabled = true;
+  setBadge($("condBadge"), d.condition.includes("Macro") ? "macro" : "primitive",
+           d.condition);
+  setBadge($("runBadge"), "run", "running");
+  $("mActions").textContent = "0"; $("mReplans").textContent = "0";
+  $("mDecisions").textContent = "0"; $("mPos").textContent = d.start;
+  $("statusLine").textContent = `seed ${d.seed} · goal ${d.goals.join(", ")}`;
+  moveAgent(d.start);
+});
+
+socket.on("step", d => {
+  moveAgent(d.current);
+  $("mActions").textContent = d.actions_taken;
+  $("mReplans").textContent = d.replans;
+  $("mDecisions").textContent = d.decisions;
+  $("mPos").textContent = d.current;
+
+  // colour the attempted door
+  const el = edgeEls[ekey(d.source, d.target)];
+  if (el) {
+    el.setAttribute("stroke", d.success ? "#3fb950" : "#f85149");
+    el.setAttribute("stroke-width", 6);
+  }
+  // permanently grey out every locked door
+  d.failed_doors.forEach(([u, v]) => {
+    const fe = edgeEls[ekey(u, v)];
+    if (fe) { fe.setAttribute("stroke", "#6e7681");
+              fe.setAttribute("stroke-dasharray", "5,5");
+              fe.setAttribute("stroke-width", 3); }
+  });
+
+  drawPlanRoad(d.plan, d.action_kind);
+  $("statusLine").textContent =
+    `${d.action_kind === "macro" ? "macro road" : "primitive step"}: `
+    + `${d.source} → ${d.target} ${d.success ? "✓ opened" : "✗ locked"}`;
+});
+
+socket.on("episode_done", d => {
+  running = false; $("runBtn").disabled = false;
+  setBadge($("runBadge"), d.reached_goal ? "run" : "idle",
+           d.reached_goal ? "reached goal" : "stuck");
+  drawPlanRoad([], "primitive");
+  $("statusLine").textContent =
+    `done — ${d.reached_goal ? "reached goal" : "gave up"} in `
+    + `${d.actions_taken} actions, ${d.decisions} decisions, `
+    + `${d.planning_time.toFixed(3)}s planning`;
+  addResult(d);
+});
+
+// initial preview
+socket.emit("preview", { map_index: 0 });
+</script>
+</body>
+</html>

@@ -6,6 +6,12 @@ from .planner import (
     OnlineReplanningAgent,
     make_baseline_agent,
     make_mcts_agent,
+    make_macro_agent,
+)
+from .macro_actions import (
+    MacroAction,
+    MacroActionLibrary,
+    generate_macro_library,
 )
 
 __all__ = [
@@ -17,4 +23,8 @@ __all__ = [
     "OnlineReplanningAgent",
     "make_baseline_agent",
     "make_mcts_agent",
+    "make_macro_agent",
+    "MacroAction",
+    "MacroActionLibrary",
+    "generate_macro_library",
 ]

@@ -246,6 +246,76 @@ def figure_results() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Figure 4 — condition comparison (Phase 2 primitive vs Phase 3 macro)
+# ---------------------------------------------------------------------------
+
+def figure_comparison() -> None:
+    """
+    Grouped bar chart comparing MDP-alone (primitive) against + Macro-actions
+    across the four benchmark maps.  Numbers are from a 100-episode-per-cell
+    run of evaluate.py; update them here after re-running the harness.
+
+    The headline of Phase 3: macro-actions slash planning *decisions* and
+    wall-clock planning time (committing to a corridor collapses several
+    plan-act-replan cycles into one), at a modest cost in success rate from
+    committing blindly to long roads — the gap that strategies + reliability
+    affordances (Phase 4/5) are meant to close.
+    """
+    maps = [
+        "5×5 easy\n(min=0.75)",
+        "5×5 medium\n(min=0.50)",
+        "5×5 bottleneck",
+        "6×6 clustered\n(min=0.50)",
+    ]
+    # (primitive, macro) per map — from evaluate.py, 100 episodes each
+    success   = ([88.0, 77.0, 79.0, 45.0], [83.0, 68.0, 73.0, 40.0])
+    decisions = ([17.56, 19.38, 14.72, 23.28], [7.91, 11.76, 9.87, 16.66])
+    actions   = ([17.44, 19.15, 14.51, 22.73], [15.62, 18.72, 16.54, 25.17])
+    plan_time = ([0.176, 0.164, 0.120, 0.228], [0.039, 0.065, 0.060, 0.112])
+
+    x = np.arange(len(maps))
+    width = 0.38
+
+    fig, axes = plt.subplots(1, 4, figsize=(18, 5))
+    fig.suptitle("Phase 2 (primitive)  vs  Phase 3 (+ macro-actions)"
+                 " — 100 episodes per map",
+                 fontsize=12)
+
+    panels = [
+        (axes[0], success,   "Success rate (%)",        (0, 105)),
+        (axes[1], decisions, "Avg planning decisions",  (0, None)),
+        (axes[2], actions,   "Avg actions taken",       (0, None)),
+        (axes[3], plan_time, "Avg planning time (s)",   (0, None)),
+    ]
+
+    for ax, (prim, macro), ylabel, ylim in panels:
+        b1 = ax.bar(x - width / 2, prim,  width, label="MDP alone",
+                    color="#42A5F5", alpha=0.9, edgecolor="white")
+        b2 = ax.bar(x + width / 2, macro, width, label="+ Macro-actions",
+                    color="#AB47BC", alpha=0.9, edgecolor="white")
+        ax.set_xticks(x)
+        ax.set_xticklabels(maps, fontsize=8)
+        ax.set_ylabel(ylabel, fontsize=9)
+        if ylim[1]:
+            ax.set_ylim(*ylim)
+        for bars in (b1, b2):
+            for bar in bars:
+                ax.text(bar.get_x() + bar.get_width() / 2,
+                        bar.get_height(), f"{bar.get_height():.2f}",
+                        ha="center", va="bottom", fontsize=6.5)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(axis="y", alpha=0.3)
+
+    axes[0].legend(fontsize=8, loc="lower left")
+
+    plt.tight_layout()
+    out = os.path.join(os.path.dirname(__file__), "results_comparison.png")
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"Saved: {out}")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -254,6 +324,8 @@ if __name__ == "__main__":
     figure_maps()
     print("Running sample episodes...")
     figure_episodes()
-    print("Generating results chart...")
+    print("Generating baseline results chart...")
     figure_results()
-    print("\nDone. Three PNG files written to tests/")
+    print("Generating condition-comparison chart...")
+    figure_comparison()
+    print("\nDone. PNG files written to tests/")

@@ -109,11 +109,12 @@ import math
 import random
 import time
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import networkx as nx
 
 from .environment import GridWorld
+from .macro_actions import MacroAction, MacroActionLibrary
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -228,6 +229,17 @@ class ReliablePathPlanner(InnerPlanner):
 # MCTSPlanner — UCT algorithm (Kocsis & Szepesvári, 2006)
 # ═══════════════════════════════════════════════════════════════════════════
 
+#  An action in the tree is EITHER a primitive door (a neighbour node tuple)
+#  OR a MacroAction object.  `_action_key` maps either to a hashable token so
+#  children can be keyed uniformly.
+
+def _action_key(action) -> object:
+    """Hashable key identifying an action (primitive node or macro)."""
+    if isinstance(action, MacroAction):
+        return ("macro", action.name)
+    return action   # primitive: the neighbour node tuple
+
+
 class _UCTNode:
     """
     A node in the UCT search tree.
@@ -237,55 +249,41 @@ class _UCTNode:
     branching from different paths correctly reflect which doors are
     unavailable in each subtree.
 
+    Actions leaving a node may be primitive door attempts (neighbour nodes)
+    or macro-actions; both are stored uniformly, keyed by `_action_key`.
+    Enumeration of available actions and terminality live on the planner
+    (they depend on the macro library), so this node stays a pure data holder.
+
     Attributes
     ----------
     state        : room (row, col)
     failed_doors : doors locked on the path from root to this node
     parent       : parent node (None for root)
-    action       : the door attempt that led here from the parent
-    children     : child nodes keyed by action (neighbour node)
+    action       : the primitive node OR MacroAction that led here from parent
+    children     : child nodes keyed by _action_key(action)
     N            : visit count
     Q            : cumulative reward (higher = better; we use −cost)
+    untried      : actions not yet expanded (lazily filled by the planner)
     """
 
     __slots__ = ("state", "failed_doors", "parent", "action",
-                 "children", "N", "Q", "_untried_actions")
+                 "children", "N", "Q", "untried")
 
     def __init__(
         self,
         state: Tuple[int, int],
         failed_doors: Set,
         parent: Optional[_UCTNode] = None,
-        action: Optional[Tuple[int, int]] = None,
+        action=None,
     ):
         self.state = state
         self.failed_doors = set(failed_doors)   # copy — node owns its set
         self.parent = parent
         self.action = action
-        self.children: Dict[Tuple[int, int], _UCTNode] = {}
+        self.children: Dict[object, _UCTNode] = {}
         self.N: int = 0
         self.Q: float = 0.0
-        self._untried_actions: Optional[List[Tuple[int, int]]] = None
-
-    def untried_actions(self, env: GridWorld) -> List[Tuple[int, int]]:
-        """Actions not yet expanded from this node."""
-        if self._untried_actions is None:
-            available = [nb for nb in env.graph.neighbors(self.state)
-                         if frozenset({self.state, nb}) not in self.failed_doors]
-            self._untried_actions = [a for a in available
-                                     if a not in self.children]
-        return self._untried_actions
-
-    def is_fully_expanded(self, env: GridWorld) -> bool:
-        return len(self.untried_actions(env)) == 0
-
-    def is_terminal(self, env: GridWorld) -> bool:
-        """True if goal reached or no doors remain."""
-        if self.state in env.goals:
-            return True
-        available = [nb for nb in env.graph.neighbors(self.state)
-                     if frozenset({self.state, nb}) not in self.failed_doors]
-        return len(available) == 0
+        self.untried: Optional[List] = None     # filled lazily by planner
 
     def ucb1(self, c: float, parent_N: int) -> float:
         """UCB1 score (Auer, Cesa-Bianchi & Fischer, 2002)."""
@@ -345,11 +343,101 @@ class MCTSPlanner(InnerPlanner):
         rollout_depth: int = 50,
         c: float = math.sqrt(2),
         seed: Optional[int] = None,
+        macro_library: Optional[MacroActionLibrary] = None,
     ):
         self.n_rollouts = n_rollouts
         self.rollout_depth = rollout_depth
         self.c = c
         self._rng = random.Random(seed)
+        # When provided, macro-actions are offered alongside primitive doors as
+        # candidate moves in the tree.  None ⇒ primitive-only (Phase 2 baseline,
+        # behaviour identical to before).
+        self.macro_library = macro_library
+
+    # ── action enumeration (primitive + macro) ───────────────────────────────
+
+    def _available_actions(self, state, failed) -> List:
+        """
+        Candidate moves from `state` given the doors locked in `failed`:
+        every non-failed primitive door, plus every applicable macro whose
+        first hop is still available.  Primitives are neighbour-node tuples;
+        macros are MacroAction objects.
+        """
+        actions: List = []
+        # The graph here is the env graph captured via closure in plan(); we
+        # read it through self._graph for the duration of one plan() call.
+        G = self._graph
+        for nb in G.neighbors(state):
+            if frozenset({state, nb}) not in failed:
+                actions.append(nb)
+        if self.macro_library is not None:
+            for macro in self.macro_library.applicable(state):
+                first = macro.first_hop
+                if (G.has_edge(state, first)
+                        and frozenset({state, first}) not in failed):
+                    actions.append(macro)
+        return actions
+
+    def _is_terminal(self, node: _UCTNode, env: GridWorld) -> bool:
+        """True if goal reached or no primitive door remains."""
+        if node.state in env.goals:
+            return True
+        # A macro's first hop is itself a primitive door, so "no primitive door
+        # available" already implies "no macro available" → terminal.
+        for nb in self._graph.neighbors(node.state):
+            if frozenset({node.state, nb}) not in node.failed_doors:
+                return False
+        return True
+
+    def _ensure_untried(self, node: _UCTNode, env: GridWorld) -> List:
+        if node.untried is None:
+            acts = self._available_actions(node.state, node.failed_doors)
+            node.untried = [a for a in acts
+                            if _action_key(a) not in node.children]
+        return node.untried
+
+    def _apply_action(self, state, failed, action):
+        """
+        Simulate taking `action` from `state` under door uncertainty.
+
+        Returns (new_state, new_failed).  A primitive succeeds (move) or fails
+        (door locked, stay put).  A macro walks its waypoints hop by hop, each
+        a Bernoulli(p) door attempt, stopping at the first hop that fails —
+        exactly how the online loop will execute a committed macro.
+        """
+        G = self._graph
+        if isinstance(action, MacroAction):
+            new_failed = set(failed)
+            cur = state
+            for nxt in action.waypoints:
+                door = frozenset({cur, nxt})
+                if door in new_failed or not G.has_edge(cur, nxt):
+                    break
+                if self._rng.random() < G[cur][nxt]["prob"]:
+                    cur = nxt          # door opened — advance
+                else:
+                    new_failed.add(door)   # door locked — macro stops here
+                    break
+            return cur, new_failed
+        # primitive door
+        if self._rng.random() < G[state][action]["prob"]:
+            return action, set(failed)
+        new_failed = set(failed)
+        new_failed.add(frozenset({state, action}))
+        return state, new_failed
+
+    @staticmethod
+    def _plan_from_action(source, action) -> List[Tuple[int, int]]:
+        """
+        Turn the chosen root action into a plan for the outer loop.
+
+        Primitive → a single committed step [source, next].
+        Macro     → the macro's full committed road [source, w0, w1, ..., term].
+        The outer loop executes the road until a door fails, then replans.
+        """
+        if isinstance(action, MacroAction):
+            return [source] + list(action.waypoints)
+        return [source, action]
 
     # ── public interface ────────────────────────────────────────────────────
 
@@ -359,17 +447,21 @@ class MCTSPlanner(InnerPlanner):
         source: Tuple[int, int],
     ) -> Optional[List[Tuple[int, int]]]:
         """
-        Run UCT from `source` and return [source, best_next_node], or None
-        if no move leads toward a goal.
+        Run UCT from `source` and return the committed plan, or None if no move
+        leads toward a goal.  The plan is [source, next] for a primitive best
+        move, or [source, ...road] when the best move is a macro-action.
         """
         if source in env.goals:
             return [source]
+
+        # Cache the graph for the duration of this call (read-only access).
+        self._graph = env.graph
 
         # Snapshot the current failed-door set — the tree is built on top of
         # the real episode history; simulations branch from here.
         root = _UCTNode(state=source, failed_doors=env.failed_doors)
 
-        if root.is_terminal(env):
+        if self._is_terminal(root, env):
             return None
 
         for _ in range(self.n_rollouts):
@@ -382,7 +474,7 @@ class MCTSPlanner(InnerPlanner):
             return None
 
         best = root.best_action_child()
-        return [source, best.action]
+        return self._plan_from_action(source, best.action)
 
     # ── UCT phases ──────────────────────────────────────────────────────────
 
@@ -393,37 +485,30 @@ class MCTSPlanner(InnerPlanner):
           - has untried actions (not fully expanded), or
           - is terminal.
         """
-        while not node.is_terminal(env) and node.is_fully_expanded(env):
+        while (not self._is_terminal(node, env)
+               and len(self._ensure_untried(node, env)) == 0):
             node = node.best_child(self.c)
         return node
 
     def _expand(self, node: _UCTNode, env: GridWorld) -> _UCTNode:
         """
         Phase 2 — EXPAND.
-        Add one new child by sampling a random untried action.
-        Returns the new child (or the node itself if already terminal).
+        Add one new child by sampling a random untried action (primitive door
+        or macro-action).  Returns the new child (or the node itself if already
+        terminal).
         """
-        if node.is_terminal(env):
+        if self._is_terminal(node, env):
             return node
 
-        untried = node.untried_actions(env)
+        untried = self._ensure_untried(node, env)
         if not untried:
             return node
 
         action = self._rng.choice(untried)
         untried.remove(action)   # mark as tried in-place
 
-        p = env.graph[node.state][action]["prob"]
-        success = self._rng.random() < p
-
-        if success:
-            new_state = action
-            new_failed = set(node.failed_doors)
-        else:
-            # door failed in this simulation branch
-            new_state = node.state
-            new_failed = set(node.failed_doors)
-            new_failed.add(frozenset({node.state, action}))
+        new_state, new_failed = self._apply_action(
+            node.state, node.failed_doors, action)
 
         child = _UCTNode(
             state=new_state,
@@ -431,7 +516,7 @@ class MCTSPlanner(InnerPlanner):
             parent=node,
             action=action,
         )
-        node.children[action] = child
+        node.children[_action_key(action)] = child
         return child
 
     def _simulate(self, node: _UCTNode, env: GridWorld) -> float:
@@ -506,16 +591,25 @@ class OnlineReplanningAgent:
     ------------------
     1. Call inner_planner.plan(env, current_state) → plan
     2. If plan is None → no viable route, give up
-    3. Execute plan[1] (the very next step)
-    4. Observe outcome: success (move) or failure (door locked)
-    5. If failure → increment replan counter, go to 1
+    3. Execute the plan step by step until a door fails, the goal is reached,
+       or the plan is exhausted
+    4. On a door failure → increment replan counter and re-plan from here
+    5. On plan exhaustion (no failure) → re-plan from the new position
     6. If at goal → success
+
+    Committed multi-step plans are how macro-actions earn their keep: a
+    primitive plan is just [source, next] (executed as one step, identical to
+    the Phase 2 baseline), whereas a macro plan is a whole committed road
+    [source, w0, w1, ...] that the agent follows without re-planning between
+    successful hops — collapsing several plan-act-replan cycles into one
+    decision.
 
     Metrics tracked per episode
     ---------------------------
     reached_goal  : bool
     actions_taken : int   — total door attempts (including failed ones)
     replans       : int   — number of times a door failure triggered replanning
+    decisions     : int   — number of plan() calls (planning decisions made)
     planning_time : float — total wall-clock seconds spent inside plan()
 
     Parameters
@@ -538,20 +632,36 @@ class OnlineReplanningAgent:
         self.reached_goal: bool = False
         self.actions_taken: int = 0
         self.replans: int = 0
+        self.decisions: int = 0
         self.planning_time: float = 0.0
 
-    def run_episode(self, verbose: bool = False) -> Dict:
+    def run_episode(
+        self,
+        verbose: bool = False,
+        step_callback: Optional[Callable[[Dict], None]] = None,
+    ) -> Dict:
         """
         Execute one episode.  Caller must call env.reset() beforehand.
+
+        Parameters
+        ----------
+        verbose       : print each step to stdout
+        step_callback : optional hook called after every door attempt with a
+                        dict describing the step (used by the live dashboard).
+                        Keys: source, target, success, done, current,
+                        failed_doors (list of [u, v]), plan, action_kind,
+                        actions_taken, replans, decisions.
 
         Returns
         -------
         dict with keys: reached_goal (bool), actions_taken (int),
-                        replans (int), planning_time (float seconds)
+                        replans (int), decisions (int),
+                        planning_time (float seconds)
         """
         self.reached_goal = False
         self.actions_taken = 0
         self.replans = 0
+        self.decisions = 0
         self.planning_time = 0.0
 
         while self.actions_taken < self.max_steps:
@@ -564,35 +674,71 @@ class OnlineReplanningAgent:
             t0 = time.perf_counter()
             plan = self.inner_planner.plan(self.env, current)
             self.planning_time += time.perf_counter() - t0
+            self.decisions += 1
 
-            if plan is None:
+            if plan is None or len(plan) < 2:
                 if verbose:
                     print(f"  [agent] No plan from {current}. Giving up.")
                 break
 
-            next_node = plan[1]
+            # Whether this decision committed to a macro-road (>1 hop) or a
+            # single primitive step — useful context for the dashboard.
+            action_kind = "macro" if len(plan) > 2 else "primitive"
 
-            if verbose:
-                print(f"  [agent] At {current} → attempting {next_node}")
+            # Execute the committed plan hop by hop until a door fails, the
+            # goal is reached, or the road is exhausted.
+            for target in plan[1:]:
+                pos = self.env.current_node
+                if self.env.is_failed(pos, target) or \
+                        not self.env.graph.has_edge(pos, target):
+                    # Road no longer walkable from here → re-plan.
+                    break
 
-            _, success, done = self.env.step(next_node)
-            self.actions_taken += 1
+                if verbose:
+                    print(f"  [agent] At {pos} → attempting {target}")
 
-            if verbose:
-                print(f"  [agent] {'OK' if success else 'FAILED'}. "
-                      f"Now at {self.env.current_node}")
+                _, success, done = self.env.step(target)
+                self.actions_taken += 1
 
-            if done:
-                self.reached_goal = True
+                if verbose:
+                    print(f"  [agent] {'OK' if success else 'FAILED'}. "
+                          f"Now at {self.env.current_node}")
+
+                if not success:
+                    self.replans += 1
+
+                if step_callback is not None:
+                    step_callback({
+                        "source": pos,
+                        "target": target,
+                        "success": success,
+                        "done": done,
+                        "current": self.env.current_node,
+                        "failed_doors": [sorted(d) for d in
+                                         self.env.failed_doors],
+                        "plan": plan,
+                        "action_kind": action_kind,
+                        "actions_taken": self.actions_taken,
+                        "replans": self.replans,
+                        "decisions": self.decisions,
+                    })
+
+                if done:
+                    self.reached_goal = True
+                    break
+
+                if not success:
+                    # Committed road is broken at this door — stop and re-plan.
+                    break
+
+            if self.reached_goal:
                 break
-
-            if not success:
-                self.replans += 1
 
         return {
             "reached_goal": self.reached_goal,
             "actions_taken": self.actions_taken,
             "replans": self.replans,
+            "decisions": self.decisions,
             "planning_time": self.planning_time,
         }
 
@@ -625,11 +771,13 @@ def make_mcts_agent(
     c: float = math.sqrt(2),
     max_steps: int = 500,
     seed: Optional[int] = None,
+    macro_library: Optional[MacroActionLibrary] = None,
 ) -> OnlineReplanningAgent:
     """
     OnlineReplanningAgent with MCTSPlanner (UCT).
     Use for all three evaluation conditions — change available moves, not
-    the planner or the outer loop.
+    the planner or the outer loop.  Pass a macro_library to enable the
+    macro-action condition (Phase 3); leave it None for the primitive baseline.
     """
     return OnlineReplanningAgent(
         inner_planner=MCTSPlanner(
@@ -637,8 +785,36 @@ def make_mcts_agent(
             rollout_depth=rollout_depth,
             c=c,
             seed=seed,
+            macro_library=macro_library,
         ),
         env=env,
         max_steps=max_steps,
+    )
+
+
+def make_macro_agent(
+    env: GridWorld,
+    n_rollouts: int = 200,
+    rollout_depth: int = 50,
+    c: float = math.sqrt(2),
+    max_steps: int = 500,
+    seed: Optional[int] = None,
+    max_macro_length: Optional[int] = None,
+) -> OnlineReplanningAgent:
+    """
+    Phase 3 condition: MCTSPlanner with auto-generated corridor / room-crossing
+    macro-actions offered alongside primitive doors.  The macro library is
+    built from the env's graph topology (see generate_macro_library).
+    """
+    from .macro_actions import generate_macro_library
+    library = generate_macro_library(env, max_length=max_macro_length)
+    return make_mcts_agent(
+        env,
+        n_rollouts=n_rollouts,
+        rollout_depth=rollout_depth,
+        c=c,
+        max_steps=max_steps,
+        seed=seed,
+        macro_library=library,
     )
 

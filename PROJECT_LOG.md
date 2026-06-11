@@ -34,6 +34,7 @@
 
 | Date | What changed | Why |
 |---|---|---|
+| 11 Jun 2026 | Phase 3 done: macro‑actions wired into the shared MCTSPlanner (+ `decisions` metric, `max_macro_length` knob) and a live Flask/Socket.IO dashboard. Outer loop generalised once (backward‑compatibly) to commit to multi‑hop plans | See Journal 2026‑06‑11. Macros cut planning decisions/time sharply at a small success cost — the gap Phase 4/5 strategies+reliability are meant to close |
 | 04 Jun 2026 | CLAUDE.md affordance wording corrected to match canon (rank/select strategies, not filter actions); roadmap split so MCTS‑with‑primitives is its own step before macro‑actions | Doc realignment to the 04 Jun decisions; underlying decision already in the 04 Jun Journal entry |
 | 04 Jun 2026 | Locked: all three eval conditions use the SAME MCTS planner; Dijkstra is scaffolding/oracle only, never a condition | Controlled experiment — avoid the planner-vs-moves confound. See Journal 2026‑06‑04 |
 | 04 Jun 2026 | Corrected affordance framing (selects strategies, not filters actions) + phase sequencing | CLAUDE.md review. See Journal 2026‑06‑04 |
@@ -54,6 +55,24 @@
 ## Development Journal
 
 *Rich, dated entries capturing discussions, debates, and reasoning — including paths not taken. This is the raw material for the thesis writeup (especially "background," "method justification," and "alternatives considered"). Append new entries at the top.*
+
+### 2026‑06‑11 — Phase 3 implemented: macro‑actions + live dashboard
+
+**Context.** Built the second evaluation condition (macro‑actions / options, Sutton‑Precup‑Singh 1999) on top of the Phase 2 MCTS baseline, plus a Flask+Socket.IO dashboard that animates episodes. All on branch `claude/dazzling-davinci-g0s93`.
+
+**What macro‑actions are, concretely.** `generate_macro_library(env)` auto‑derives macros from graph *topology only*: for every room and each of the 4 grid directions it builds the maximal straight run of rooms ("head East down this corridor"). On clustered maps these runs cross the bridge edges, so they double as room‑crossing macros. A macro's initiation set is its single entry room; its `waypoints` are the rooms after entry; `first_hop` is the first room entered. Door probabilities are deliberately *not* consulted at generation time — reliability is left for MCTS to evaluate by simulation.
+
+**How they wire into the planner (no planner duplication).** `MCTSPlanner` gained an optional `macro_library`. In EXPAND, a node's candidate actions are now *primitive doors ∪ applicable macros whose first hop is still open*. A primitive action is a neighbour‑node tuple; a macro is a `MacroAction` object; `_action_key` keys both uniformly in the tree. Taking a macro in simulation (`_apply_action`) walks its waypoints hop‑by‑hop as Bernoulli(p) door attempts, stopping at the first failed door — exactly how the online loop will execute it. Rollouts stay primitive‑random (macros enrich the *tree*, not the rollout policy). `macro_library=None` ⇒ primitive‑only, byte‑for‑byte the Phase 2 baseline (verified: existing tests unchanged).
+
+**The one deliberate generalisation of the "unchanging" outer loop.** Canon says the outer loop never changes across conditions. It still doesn't *branch* per condition — but I generalised it once, backward‑compatibly: instead of executing only `plan[1]`, it now executes the *whole returned plan* hop‑by‑hop until a door fails / goal / plan exhausted, then replans. For the primitive baseline the plan is always `[source, next]` (length 2) so behaviour is identical. For macros the planner returns the committed road `[source, w0, w1, …]`, so the agent follows several primitive hops per `plan()` call. This is what gives macros their teeth and is the cleanest way to honour "fewer decisions" without a per‑condition loop. Added a new metric **`decisions`** = number of `plan()` calls (distinct from `replans` = door‑failure‑forced replans).
+
+**Result (4 benchmark maps, 100 eps each).** Macros cut planning **decisions ~40‑55 %** and **wall‑clock planning time ~50‑75 %** vs primitive, with similar action counts. Cost: **5‑9 pt lower success** — committing to a long corridor is blunt; if a mid‑corridor door fails the agent has already spent attempts and may strand. Confirmed a clean knob: `max_macro_length` trades savings for reliability (len‑2 macros ≈ baseline success with ~19 % fewer decisions; uncapped maximises savings and the success hit). Registered the *uncapped* version as the canonical "+ Macro‑actions" condition (most natural macro definition; honest about the tradeoff).
+
+**Why this is the right setup for Phase 4/5.** The success gap is the *motivation* for strategies + reliability affordances, not a defect: a macro commits blindly because it is just a sequence of actions, whereas a strategy is a sequence of *states* (knows where it is going) and the **reliability affordance** can score a strategy's groundability *before* committing — precisely the dimension a topology‑only macro lacks. So the narrative arc is: primitive (adaptive but expensive) → macro (cheap but blunt) → strategy+affordance (cheap *and* reliability‑aware).
+
+**Dashboard.** `dashboard/app.py` (Flask + Flask‑SocketIO, threading async mode — no eventlet) reuses the *exact* `GridWorld` / `OnlineReplanningAgent` / `MCTSPlanner` from `evaluate.py`; animation is driven purely by a new `run_episode(step_callback=…)` hook, so there is zero planner logic in the web layer (what you watch is what `evaluate.py` measures). The SVG frontend colour‑codes doors by probability (green→red), greys out locked doors, draws the committed macro road ahead of the agent in purple, and accumulates a per‑condition results table. Verified end‑to‑end with a `python-socketio` client. Added `flask`/`flask-socketio` to `requirements.txt`.
+
+**Discarded alternative.** Considered making the outer loop execute only `plan[1]` and letting macros help *only* via deeper lookahead (keeping the loop textually identical). Rejected: with replanning every step the macro's commitment benefit (fewer decisions/time) vanishes and the "+macro" column would differ from baseline only by noise — defeating the point of the middle comparison.
 
 ### 2026‑06‑09 — Added CODE_GUIDE.md (human-readable code companion)
 
