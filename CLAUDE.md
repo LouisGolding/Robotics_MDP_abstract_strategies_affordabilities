@@ -29,13 +29,16 @@ We're extending abstract strategies and affordances (from Khen's published resea
 - **ACSD** = abstraction-critical state detection. How strategies are extracted from a single execution trace.
 - **Two senses of "success probability"** — don't conflate: (1) probability a plan succeeds in the MDP (from transition probabilities), (2) probability a strategy can be grounded into actions (refine; if can't, abort and backtrack).
 
-## Full project log
+## Full research context
 
-The detailed meeting notes, background, and changelog live in the Claude.ai project knowledge base (`PROJECT_LOG.md`). This file is the compact version for Claude Code sessions.
+All theory, supervisor decisions, meeting notes, and the reasoning behind every canonical choice live in **PROJECT_LOG.md** (repo root). Read it at the start of every session — it is the single source of truth for *why* things are the way they are.
 
-## Development notes
-
-<!-- Append implementation decisions, algorithm choices, experiment parameters here as we go -->
+Key sections to read first:
+- **⚠ CANONICAL block** (top of PROJECT_LOG.md) — the locked decisions that override everything else
+- **§3 Background** — the three Elimelech papers and what we take from each
+- **§4 Vocabulary** — MDP, policy vs plan, online vs offline, the two senses of "success probability"
+- **§6 Meeting 2** — where the three-way evaluation, one-try-per-door, and reliability affordance were locked
+- **Development Journal** — dated entries capturing every design debate and discarded path
 
 ---
 
