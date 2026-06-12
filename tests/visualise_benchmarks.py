@@ -24,7 +24,7 @@ import networkx as nx
 import numpy as np
 
 from mdp_nav import GridWorld, DoorProbabilitySpec, make_mcts_agent
-from tests.evaluate import BENCHMARK_MAPS
+from tests.evaluate import BENCHMARK_MAPS, MCTS_ROLLOUTS, ROLLOUT_DEPTH
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +156,8 @@ def figure_episodes() -> None:
         env = bm.make_env()
         env.reset(seed=7)          # fixed seed for reproducibility
 
-        agent = make_mcts_agent(env, n_rollouts=300, seed=0)
+        agent = make_mcts_agent(env, n_rollouts=MCTS_ROLLOUTS,
+                                rollout_depth=ROLLOUT_DEPTH, seed=0)
 
         # Track path manually
         path = [env.current_node]

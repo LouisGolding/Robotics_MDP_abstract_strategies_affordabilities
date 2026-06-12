@@ -31,7 +31,7 @@ from flask import Flask, render_template
 from flask_socketio import SocketIO
 
 from mdp_nav import GridWorld, make_mcts_agent, make_macro_agent
-from tests.evaluate import BENCHMARK_MAPS
+from tests.evaluate import BENCHMARK_MAPS, MCTS_ROLLOUTS, ROLLOUT_DEPTH
 
 
 app = Flask(__name__)
@@ -88,7 +88,7 @@ def run_episode_task(map_index: int, condition_key: str,
 
     env = benchmark.make_env()
     env.reset(seed=seed)
-    agent = factory(env, n_rollouts=200, seed=0)
+    agent = factory(env, n_rollouts=MCTS_ROLLOUTS, rollout_depth=ROLLOUT_DEPTH, seed=0)
 
     socketio.emit("map", serialise_map(env, benchmark.name))
     socketio.emit("episode_start", {

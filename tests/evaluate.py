@@ -129,8 +129,9 @@ BENCHMARK_MAPS: List[BenchmarkMap] = [
     ),
 ]
 
-N_EPISODES = 100
-MCTS_ROLLOUTS = 300
+N_EPISODES     = 100   # episodes per condition per map
+MCTS_ROLLOUTS  = 300   # UCT iterations per plan() call  — single source of truth
+ROLLOUT_DEPTH  = 50    # max steps per simulation rollout — single source of truth
 
 
 # ---------------------------------------------------------------------------
@@ -142,12 +143,14 @@ MCTS_ROLLOUTS = 300
 
 def _condition_mcts_primitive(env: GridWorld) -> OnlineReplanningAgent:
     """Condition 1: MCTSPlanner with primitive door actions only."""
-    return make_mcts_agent(env, n_rollouts=MCTS_ROLLOUTS, seed=0)
+    return make_mcts_agent(env, n_rollouts=MCTS_ROLLOUTS,
+                           rollout_depth=ROLLOUT_DEPTH, seed=0)
 
 
 def _condition_mcts_macro(env: GridWorld) -> OnlineReplanningAgent:
     """Condition 2: MCTSPlanner with auto-generated macro-actions (Phase 3)."""
-    return make_macro_agent(env, n_rollouts=MCTS_ROLLOUTS, seed=0)
+    return make_macro_agent(env, n_rollouts=MCTS_ROLLOUTS,
+                            rollout_depth=ROLLOUT_DEPTH, seed=0)
 
 
 CONDITIONS: List[tuple] = [
