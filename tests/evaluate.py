@@ -46,6 +46,7 @@ from mdp_nav import (
     DoorProbabilitySpec,
     make_mcts_agent,
     make_macro_agent,
+    TraceRecorder,
 )
 from mdp_nav.planner import OnlineReplanningAgent
 
@@ -133,6 +134,11 @@ N_EPISODES     = 100   # episodes per condition per map
 MCTS_ROLLOUTS  = 300   # UCT iterations per plan() call  — single source of truth
 ROLLOUT_DEPTH  = 50    # max steps per simulation rollout — single source of truth
 
+PERSIST_TRACES = True                          # write traces to SQLite when True
+TRACES_DB      = os.path.join(               # path to the SQLite database
+    os.path.dirname(__file__), "..", "results", "trials.db"
+)
+
 
 # ---------------------------------------------------------------------------
 # Condition registry
@@ -169,20 +175,29 @@ def run_condition(
     agent_factory: Callable[[GridWorld], OnlineReplanningAgent],
     benchmark: BenchmarkMap,
     n_episodes: int,
+    recorder: Optional["TraceRecorder"] = None,
 ) -> ConditionResult:
     env = benchmark.make_env()
     agent = agent_factory(env)
     result = ConditionResult(label=label, n_episodes=n_episodes)
 
+    run_id: Optional[int] = None
+    if recorder is not None:
+        params = {"n_rollouts": MCTS_ROLLOUTS, "rollout_depth": ROLLOUT_DEPTH}
+        run_id = recorder.begin_run(label, type(agent.inner_planner).__name__, params, env)
+
     for ep in range(n_episodes):
         env.reset(seed=ep)
-        ep_result = agent.run_episode()
+        step_cb = recorder.make_step_callback() if recorder is not None else None
+        ep_result = agent.run_episode(step_callback=step_cb)
         if ep_result["reached_goal"]:
             result.successes += 1
         result.total_replans += ep_result["replans"]
         result.total_actions += ep_result["actions_taken"]
         result.total_decisions += ep_result["decisions"]
         result.total_planning_time += ep_result["planning_time"]
+        if recorder is not None:
+            recorder.end_episode(run_id, ep, ep_result, env)
 
     return result
 
@@ -230,15 +245,26 @@ def main() -> None:
     print(f"Benchmark maps    : {len(BENCHMARK_MAPS)}")
     print(f"Episodes per cell : {N_EPISODES}")
     print(f"MCTS rollouts     : {MCTS_ROLLOUTS}")
+    if PERSIST_TRACES:
+        print(f"Trace DB          : {TRACES_DB}")
+
+    recorder: Optional[TraceRecorder] = (
+        TraceRecorder(TRACES_DB) if PERSIST_TRACES else None
+    )
 
     t_start = time.perf_counter()
 
-    for benchmark in BENCHMARK_MAPS:
-        results = []
-        for label, factory in CONDITIONS:
-            r = run_condition(label, factory, benchmark, N_EPISODES)
-            results.append(r)
-        print_table(benchmark, results)
+    try:
+        for benchmark in BENCHMARK_MAPS:
+            results = []
+            for label, factory in CONDITIONS:
+                r = run_condition(label, factory, benchmark, N_EPISODES,
+                                  recorder=recorder)
+                results.append(r)
+            print_table(benchmark, results)
+    finally:
+        if recorder is not None:
+            recorder.close()
 
     elapsed = time.perf_counter() - t_start
     print(f"\nTotal wall-clock time: {elapsed:.1f}s")

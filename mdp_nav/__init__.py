@@ -13,6 +13,7 @@ from .macro_actions import (
     MacroActionLibrary,
     generate_macro_library,
 )
+from .trace_store import TraceRecorder
 
 __all__ = [
     "GridWorld",
@@ -27,4 +28,5 @@ __all__ = [
     "MacroAction",
     "MacroActionLibrary",
     "generate_macro_library",
+    "TraceRecorder",
 ]
