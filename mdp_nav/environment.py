@@ -131,7 +131,8 @@ class GridWorld:
         # episode state — reset() initialises these
         self._rng = random.Random(seed)
         self.current_node: Tuple[int, int] = start
-        self.failed_doors: Set[FrozenSet] = set()  # frozenset({u, v})
+        self.failed_doors: Set[FrozenSet] = set()  # frozenset({u, v}) — closed
+        self.opened_doors: Set[FrozenSet] = set()  # frozenset({u, v}) — open
 
     # ------------------------------------------------------------------
     # Graph construction
@@ -218,6 +219,7 @@ class GridWorld:
             self._rng = random.Random(seed)
         self.current_node = self.start
         self.failed_doors = set()
+        self.opened_doors = set()
         return self.current_node
 
     def available_doors(
@@ -258,11 +260,22 @@ class GridWorld:
                 f"Door {self.current_node}↔{target} already permanently closed"
             )
 
-        p = self._base_graph[self.current_node][target]["prob"]
-        success = self._rng.random() < p
-        if not success:
-            self.failed_doors.add(key)
+        # A door's state is STATIC: it is decided exactly once, on the first
+        # attempt, and never changes for the rest of the episode.  A door that
+        # has already opened stays open (effective prob 1, no re-roll); a door
+        # that has failed stays closed (handled above).  Only a never-attempted
+        # door is sampled from its open-probability.
+        if key in self.opened_doors:
+            success = True                       # already known open
         else:
+            p = self._base_graph[self.current_node][target]["prob"]
+            success = self._rng.random() < p
+            if success:
+                self.opened_doors.add(key)       # latch open — permanent
+            else:
+                self.failed_doors.add(key)       # latch closed — permanent
+
+        if success:
             self.current_node = target
 
         done = self.current_node in self.goals
@@ -278,6 +291,10 @@ class GridWorld:
 
     def is_failed(self, u: Tuple[int, int], v: Tuple[int, int]) -> bool:
         return frozenset({u, v}) in self.failed_doors
+
+    def is_open(self, u: Tuple[int, int], v: Tuple[int, int]) -> bool:
+        """True if this door has already been opened (now permanently open)."""
+        return frozenset({u, v}) in self.opened_doors
 
     @property
     def graph(self) -> nx.Graph:

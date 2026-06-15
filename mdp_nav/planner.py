@@ -266,18 +266,22 @@ class _UCTNode:
     untried      : actions not yet expanded (lazily filled by the planner)
     """
 
-    __slots__ = ("state", "failed_doors", "parent", "action",
+    __slots__ = ("state", "failed_doors", "opened_doors", "parent", "action",
                  "children", "N", "Q", "untried")
 
     def __init__(
         self,
         state: Tuple[int, int],
         failed_doors: Set,
+        opened_doors: Optional[Set] = None,
         parent: Optional[_UCTNode] = None,
         action=None,
     ):
         self.state = state
         self.failed_doors = set(failed_doors)   # copy — node owns its set
+        # Doors known to be open (prob 1) along this branch.  Static world:
+        # an opened door never re-closes, so simulations must not re-roll it.
+        self.opened_doors = set(opened_doors) if opened_doors else set()
         self.parent = parent
         self.action = action
         self.children: Dict[object, _UCTNode] = {}
@@ -396,35 +400,48 @@ class MCTSPlanner(InnerPlanner):
                             if _action_key(a) not in node.children]
         return node.untried
 
-    def _apply_action(self, state, failed, action):
+    def _apply_action(self, state, failed, opened, action):
         """
         Simulate taking `action` from `state` under door uncertainty.
 
-        Returns (new_state, new_failed).  A primitive succeeds (move) or fails
-        (door locked, stay put).  A macro walks its waypoints hop by hop, each
-        a Bernoulli(p) door attempt, stopping at the first hop that fails —
-        exactly how the online loop will execute a committed macro.
+        Returns (new_state, new_failed, new_opened).  A primitive succeeds
+        (move) or fails (door locked, stay put).  A macro walks its waypoints
+        hop by hop, each a Bernoulli(p) door attempt, stopping at the first hop
+        that fails — exactly how the online loop will execute a committed macro.
+
+        Static-world semantics: a door already in `opened` is certain (prob 1,
+        no re-roll); a freshly opened door is latched into `new_opened` so it
+        stays open for the rest of this branch.
         """
         G = self._graph
         if isinstance(action, MacroAction):
             new_failed = set(failed)
+            new_opened = set(opened)
             cur = state
             for nxt in action.waypoints:
                 door = frozenset({cur, nxt})
                 if door in new_failed or not G.has_edge(cur, nxt):
                     break
-                if self._rng.random() < G[cur][nxt]["prob"]:
+                if door in new_opened:
+                    cur = nxt          # known open — advance for free
+                elif self._rng.random() < G[cur][nxt]["prob"]:
+                    new_opened.add(door)
                     cur = nxt          # door opened — advance
                 else:
                     new_failed.add(door)   # door locked — macro stops here
                     break
-            return cur, new_failed
+            return cur, new_failed, new_opened
         # primitive door
+        door = frozenset({state, action})
+        if door in opened:
+            return action, set(failed), set(opened)   # known open
         if self._rng.random() < G[state][action]["prob"]:
-            return action, set(failed)
+            new_opened = set(opened)
+            new_opened.add(door)
+            return action, set(failed), new_opened
         new_failed = set(failed)
-        new_failed.add(frozenset({state, action}))
-        return state, new_failed
+        new_failed.add(door)
+        return state, new_failed, set(opened)
 
     @staticmethod
     def _plan_from_action(source, action) -> List[Tuple[int, int]]:
@@ -457,9 +474,12 @@ class MCTSPlanner(InnerPlanner):
         # Cache the graph for the duration of this call (read-only access).
         self._graph = env.graph
 
-        # Snapshot the current failed-door set — the tree is built on top of
-        # the real episode history; simulations branch from here.
-        root = _UCTNode(state=source, failed_doors=env.failed_doors)
+        # Snapshot the current failed- AND opened-door sets — the tree is built
+        # on top of the real episode history; simulations branch from here.
+        # Doors already observed open are certain (prob 1) and must not be
+        # re-rolled, matching the static-world semantics of the environment.
+        root = _UCTNode(state=source, failed_doors=env.failed_doors,
+                        opened_doors=env.opened_doors)
 
         if self._is_terminal(root, env):
             return None
@@ -507,12 +527,13 @@ class MCTSPlanner(InnerPlanner):
         action = self._rng.choice(untried)
         untried.remove(action)   # mark as tried in-place
 
-        new_state, new_failed = self._apply_action(
-            node.state, node.failed_doors, action)
+        new_state, new_failed, new_opened = self._apply_action(
+            node.state, node.failed_doors, node.opened_doors, action)
 
         child = _UCTNode(
             state=new_state,
             failed_doors=new_failed,
+            opened_doors=new_opened,
             parent=node,
             action=action,
         )
@@ -530,6 +551,7 @@ class MCTSPlanner(InnerPlanner):
         """
         state = node.state
         failed = set(node.failed_doors)
+        opened = set(node.opened_doors)
         G = env.graph
         steps = 0
 
@@ -544,11 +566,14 @@ class MCTSPlanner(InnerPlanner):
                 return -1.0   # dead-end penalty
 
             action = self._rng.choice(available)
-            p = G[state][action]["prob"]
-            if self._rng.random() < p:
+            door = frozenset({state, action})
+            if door in opened:
+                state = action                  # known open — no re-roll
+            elif self._rng.random() < G[state][action]["prob"]:
+                opened.add(door)
                 state = action
             else:
-                failed.add(frozenset({state, action}))
+                failed.add(door)
             steps += 1
 
         # depth exceeded — small negative reward proportional to distance
