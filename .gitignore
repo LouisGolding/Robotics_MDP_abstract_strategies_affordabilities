@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# Generated trace databases (created by evaluate.py — reproducible artifact)
+results/
+*.db
