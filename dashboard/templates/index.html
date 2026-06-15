@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MDP Navigation — Live Dashboard</title>
+<title>MDP Navigation — Dashboard</title>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <style>
   :root {
@@ -22,27 +22,77 @@
   }
   header h1 { font-size: 17px; margin: 0; font-weight: 600; }
   header .sub { color: var(--muted); font-size: 12px; }
-  .layout { display: flex; gap: 18px; padding: 18px 22px; align-items: flex-start; }
-  .stage { background: var(--panel); border: 1px solid var(--line);
-           border-radius: 10px; padding: 14px; }
-  .side { width: 380px; display: flex; flex-direction: column; gap: 14px; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 4px; padding: 0 22px; border-bottom: 1px solid var(--line); }
+  .tab {
+    padding: 11px 18px; cursor: pointer; color: var(--muted);
+    border-bottom: 2px solid transparent; font-weight: 600; font-size: 13px;
+    user-select: none;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .view { display: none; padding: 20px 22px; }
+  .view.active { display: block; }
+
   .card { background: var(--panel); border: 1px solid var(--line);
-          border-radius: 10px; padding: 14px; }
+          border-radius: 10px; padding: 16px; }
   .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
-             color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+             color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+
+  /* results */
+  .res-block { margin-bottom: 22px; }
+  .res-block h3 { font-size: 14px; margin: 0 0 8px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr.cond-macro td:first-child { color: var(--macro); }
+  tr.cond-prim td:first-child { color: var(--accent); }
+
+  /* maps gallery */
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+             gap: 16px; }
+  .map-card { background: var(--panel); border: 1px solid var(--line);
+              border-radius: 10px; padding: 12px; cursor: pointer;
+              transition: border-color .15s, transform .15s; }
+  .map-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .map-card .title { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+  .map-card .hint { color: var(--muted); font-size: 11px; margin-top: 6px; }
+  .map-card svg { width: 100%; height: auto; display: block; }
+
+  /* focus */
+  .focus-layout { display: flex; gap: 18px; align-items: flex-start; }
+  .focus-stage { background: var(--panel); border: 1px solid var(--line);
+                 border-radius: 10px; padding: 16px; }
+  .focus-side { width: 360px; display: flex; flex-direction: column; gap: 14px; }
+  .back-link { color: var(--accent); cursor: pointer; font-size: 13px;
+               display: inline-flex; align-items: center; gap: 5px; margin-bottom: 14px; }
+  .back-link:hover { text-decoration: underline; }
+
+  .runs-list { max-height: 360px; overflow-y: auto; display: flex;
+               flex-direction: column; gap: 5px; padding-right: 4px; }
+  .run-item {
+    display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+    background: #0d1117; border: 1px solid var(--line); border-radius: 7px;
+    cursor: pointer; font-size: 12px; transition: border-color .12s, background .12s;
+  }
+  .run-item:hover { border-color: var(--accent); }
+  .run-item.active { border-color: var(--accent); background: rgba(88,166,255,.12); }
+  .run-item .seed { color: var(--muted); width: 54px; }
+  .run-item .res { width: 16px; font-weight: 700; }
+  .run-item .res.ok { color: var(--ok); } .run-item .res.bad { color: var(--bad); }
+  .run-item .stat { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  .filter-row { display: flex; gap: 6px; margin-bottom: 10px; }
+  .chip { padding: 4px 10px; border-radius: 20px; font-size: 11px; cursor: pointer;
+          border: 1px solid var(--line); color: var(--muted); user-select: none; }
+  .chip.active { background: rgba(88,166,255,.15); color: var(--accent);
+                 border-color: var(--accent); }
+
   .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
-  .row label { width: 92px; color: var(--muted); font-size: 12px; }
-  select, input[type=number] {
-    flex: 1; background: #0d1117; color: var(--ink); border: 1px solid var(--line);
-    border-radius: 6px; padding: 6px 8px; font-size: 13px;
-  }
+  .row label { width: 70px; color: var(--muted); font-size: 12px; }
   input[type=range] { flex: 1; }
-  button {
-    width: 100%; padding: 9px; border: 0; border-radius: 7px; cursor: pointer;
-    background: var(--accent); color: #04101f; font-weight: 700; font-size: 14px;
-  }
-  button:disabled { opacity: .5; cursor: default; }
-  button.secondary { background: #21262d; color: var(--ink); border: 1px solid var(--line); }
   .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .metric { background: #0d1117; border: 1px solid var(--line); border-radius: 8px;
             padding: 8px 10px; }
@@ -54,91 +104,86 @@
   .badge.primitive { background: rgba(88,166,255,.18); color: var(--accent); }
   .badge.run { background: rgba(63,185,80,.18); color: var(--ok); }
   .badge.idle { background: #21262d; color: var(--muted); }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { text-align: right; padding: 5px 6px; border-bottom: 1px solid var(--line); }
-  th:first-child, td:first-child { text-align: left; }
-  th { color: var(--muted); font-weight: 600; }
-  td.goal-yes { color: var(--ok); } td.goal-no { color: var(--bad); }
   .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px;
             font-size: 11px; color: var(--muted); }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
   .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
   .edge { transition: stroke .25s, stroke-width .25s; }
-  #agent { transition: cx .35s ease, cy .35s ease; }
-  .status-line { font-size: 12px; color: var(--muted); min-height: 16px; }
+  .agent-marker { transition: cx .35s ease, cy .35s ease; }
+  .status-line { font-size: 12px; color: var(--muted); min-height: 16px; margin-top: 8px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 30px; text-align: center; }
 </style>
 </head>
 <body>
 <header>
   <h1>Stochastic Navigation MDP</h1>
-  <span class="sub">online plan · act · observe · replan — primitive vs macro-actions</span>
+  <span class="sub">recorded runs · primitive vs macro-actions · replayed from trials.db</span>
 </header>
 
-<div class="layout">
-  <div class="stage">
-    <svg id="grid" width="640" height="640"></svg>
-    <div class="legend">
-      <span><span class="dot" style="background:hsl(120,70%,45%)"></span>reliable door</span>
-      <span><span class="dot" style="background:hsl(0,70%,45%)"></span>risky door</span>
-      <span><span class="dot" style="background:#6e7681"></span>locked door</span>
-      <span><span class="dot" style="background:#58a6ff"></span>agent</span>
-      <span><span class="dot" style="background:#3fb950"></span>goal</span>
-      <span><span class="dot" style="background:#c678dd"></span>committed macro road</span>
-    </div>
-  </div>
+<div class="tabs">
+  <div class="tab active" data-view="results">Results</div>
+  <div class="tab" data-view="maps">Maps</div>
+  <div class="tab" data-view="focus">Focus</div>
+</div>
 
-  <div class="side">
-    <div class="card">
-      <h2>Controls</h2>
-      <div class="row">
-        <label>Map</label>
-        <select id="mapSel">
-          {% for m in maps %}<option value="{{ m.index }}">{{ m.name }}</option>{% endfor %}
-        </select>
+<!-- ============================ RESULTS ============================ -->
+<div class="view active" id="view-results">
+  <div id="resultsHost"></div>
+</div>
+
+<!-- ============================ MAPS ============================ -->
+<div class="view" id="view-maps">
+  <div class="gallery" id="gallery"></div>
+</div>
+
+<!-- ============================ FOCUS ============================ -->
+<div class="view" id="view-focus">
+  <div class="back-link" id="backToMaps">← all maps</div>
+  <h2 id="focusTitle" style="margin:0 0 14px;font-size:16px"></h2>
+  <div class="focus-layout">
+    <div class="focus-stage">
+      <svg id="focusGrid" width="560" height="560"></svg>
+      <div class="legend">
+        <span><span class="dot" style="background:hsl(120,70%,45%)"></span>reliable door</span>
+        <span><span class="dot" style="background:hsl(0,70%,45%)"></span>risky door</span>
+        <span><span class="dot" style="background:#6e7681"></span>locked door</span>
+        <span><span class="dot" style="background:#58a6ff"></span>agent</span>
+        <span><span class="dot" style="background:#3fb950"></span>goal</span>
+        <span><span class="dot" style="background:#c678dd"></span>committed road</span>
       </div>
-      <div class="row">
-        <label>Condition</label>
-        <select id="condSel">
-          {% for c in conditions %}<option value="{{ c.key }}">{{ c.label }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="row">
-        <label>Episode seed</label>
-        <input id="seed" type="number" value="0" min="0" />
-      </div>
-      <div class="row">
-        <label>Speed</label>
-        <input id="speed" type="range" min="0.05" max="1.2" step="0.05" value="0.4" />
-        <span id="speedVal" style="width:46px;text-align:right;color:var(--muted)">0.40s</span>
-      </div>
-      <button id="runBtn">▶ Run episode</button>
+      <div class="status-line" id="statusLine"></div>
     </div>
 
-    <div class="card">
-      <h2>Live episode</h2>
-      <div class="row" style="justify-content:space-between;margin-bottom:8px">
-        <span id="condBadge" class="badge idle">idle</span>
-        <span id="runBadge" class="badge idle">waiting</span>
+    <div class="focus-side">
+      <div class="card">
+        <h2>Replay</h2>
+        <div class="row" style="justify-content:space-between">
+          <span id="condBadge" class="badge idle">no run selected</span>
+          <span id="runBadge" class="badge idle">idle</span>
+        </div>
+        <div class="metrics" style="margin-top:10px">
+          <div class="metric"><div class="k">Actions</div><div class="v" id="mActions">0</div></div>
+          <div class="metric"><div class="k">Replans</div><div class="v" id="mReplans">0</div></div>
+          <div class="metric"><div class="k">Decisions</div><div class="v" id="mDecisions">0</div></div>
+          <div class="metric"><div class="k">At room</div><div class="v" id="mPos" style="font-size:15px">—</div></div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <label>Speed</label>
+          <input id="speed" type="range" min="0.05" max="1.0" step="0.05" value="0.35" />
+          <span id="speedVal" style="width:46px;text-align:right;color:var(--muted)">0.35s</span>
+        </div>
       </div>
-      <div class="metrics">
-        <div class="metric"><div class="k">Actions</div><div class="v" id="mActions">0</div></div>
-        <div class="metric"><div class="k">Replans</div><div class="v" id="mReplans">0</div></div>
-        <div class="metric"><div class="k">Decisions</div><div class="v" id="mDecisions">0</div></div>
-        <div class="metric"><div class="k">At room</div><div class="v" id="mPos" style="font-size:15px">—</div></div>
-      </div>
-      <div class="status-line" id="statusLine" style="margin-top:10px"></div>
-    </div>
 
-    <div class="card">
-      <h2>Results (this session) <button id="clearBtn" class="secondary"
-           style="width:auto;padding:3px 9px;float:right;font-size:11px">clear</button></h2>
-      <table id="resTable">
-        <thead><tr>
-          <th>Condition</th><th>Goal</th><th>Act</th><th>Rep</th><th>Dec</th><th>Plan(s)</th>
-        </tr></thead>
-        <tbody id="resBody"></tbody>
-        <tfoot id="resFoot"></tfoot>
-      </table>
+      <div class="card">
+        <h2>Recorded runs</h2>
+        <div class="filter-row">
+          <span class="chip active" data-filter="all">All</span>
+          <span class="chip" data-filter="primitive">Primitive</span>
+          <span class="chip" data-filter="macro">Macro</span>
+          <span class="chip" data-filter="fail">Failures</span>
+        </div>
+        <div class="runs-list" id="runsList"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -146,179 +191,270 @@
 <script>
 const socket = io();
 const SVG = "http://www.w3.org/2000/svg";
-const grid = document.getElementById("grid");
-let nodePos = {};      // id -> {x,y}
-let edgeEls = {};      // "a|b" canonical -> line element
-let goals = new Set();
 
-function probColor(p) { return `hsl(${Math.round(p * 120)},70%,45%)`; }
-function ekey(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
+// ---- generic map renderer ----------------------------------------------
+// Renders map `m` into svg element `svgEl`. Returns a context with nodePos
+// and edgeEls (only needed for the animated focus map).
+function renderMap(svgEl, m, opts = {}) {
+  const maxSize = opts.maxSize || 560;
+  const interactive = opts.interactive || false;
+  svgEl.innerHTML = "";
+  const nodePos = {}, edgeEls = {};
+  const goals = new Set(m.goals);
 
-// ---- render a fresh map -------------------------------------------------
-function renderMap(m) {
-  grid.innerHTML = "";
-  nodePos = {}; edgeEls = {}; goals = new Set(m.goals);
-
-  const step = Math.min(110, Math.floor(560 / Math.max(1, Math.max(m.rows, m.cols) - 1) ) || 110);
-  const margin = 50;
+  const span = Math.max(1, Math.max(m.rows, m.cols) - 1);
+  const step = Math.floor((maxSize - 100) / span) || 90;
+  const margin = 48;
   const w = margin * 2 + (m.cols - 1) * step;
   const h = margin * 2 + (m.rows - 1) * step;
-  grid.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  grid.setAttribute("width", Math.min(640, w));
-  grid.setAttribute("height", Math.min(640, h));
+  svgEl.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svgEl.removeAttribute("width"); svgEl.removeAttribute("height");
+  if (!interactive) { svgEl.style.maxHeight = "260px"; }
 
-  m.nodes.forEach(n => {
-    nodePos[n.id] = { x: margin + n.c * step, y: margin + n.r * step };
-  });
+  m.nodes.forEach(n => { nodePos[n.id] = { x: margin + n.c * step, y: margin + n.r * step }; });
 
-  // edges
+  const R = interactive ? 15 : 11;
+  const fs = interactive ? 9 : 7;
+
   m.edges.forEach(e => {
     const a = nodePos[e.u], b = nodePos[e.v];
     const line = document.createElementNS(SVG, "line");
     line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
     line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
-    line.setAttribute("stroke", probColor(e.prob));
-    line.setAttribute("stroke-width", 4);
+    line.setAttribute("stroke", `hsl(${Math.round(e.prob*120)},70%,45%)`);
+    line.setAttribute("stroke-width", interactive ? 4 : 3);
     line.setAttribute("class", "edge");
-    line.dataset.prob = e.prob;
-    grid.appendChild(line);
+    svgEl.appendChild(line);
     edgeEls[ekey(e.u, e.v)] = line;
-
-    // probability label
-    const lbl = document.createElementNS(SVG, "text");
-    lbl.setAttribute("x", (a.x + b.x) / 2);
-    lbl.setAttribute("y", (a.y + b.y) / 2 - 3);
-    lbl.setAttribute("fill", "#8b98a5");
-    lbl.setAttribute("font-size", "10");
-    lbl.setAttribute("text-anchor", "middle");
-    lbl.textContent = e.prob.toFixed(2);
-    grid.appendChild(lbl);
+    if (interactive) {
+      const lbl = document.createElementNS(SVG, "text");
+      lbl.setAttribute("x", (a.x+b.x)/2); lbl.setAttribute("y", (a.y+b.y)/2 - 3);
+      lbl.setAttribute("fill", "#8b98a5"); lbl.setAttribute("font-size", "10");
+      lbl.setAttribute("text-anchor", "middle");
+      lbl.textContent = e.prob.toFixed(2);
+      svgEl.appendChild(lbl);
+    }
   });
 
-  // committed-plan road (drawn under nodes, updated each step)
-  const road = document.createElementNS(SVG, "polyline");
-  road.setAttribute("id", "planRoad");
-  road.setAttribute("fill", "none");
-  road.setAttribute("stroke", "#c678dd");
-  road.setAttribute("stroke-width", 9);
-  road.setAttribute("stroke-linecap", "round");
-  road.setAttribute("stroke-linejoin", "round");
-  road.setAttribute("opacity", "0");
-  grid.appendChild(road);
+  if (interactive) {
+    const road = document.createElementNS(SVG, "polyline");
+    road.setAttribute("id", "planRoad");
+    road.setAttribute("fill", "none"); road.setAttribute("stroke", "#c678dd");
+    road.setAttribute("stroke-width", 9); road.setAttribute("stroke-linecap", "round");
+    road.setAttribute("stroke-linejoin", "round"); road.setAttribute("opacity", "0");
+    svgEl.appendChild(road);
+  }
 
-  // nodes
   m.nodes.forEach(n => {
-    const p = nodePos[n.id];
+    const p = nodePos[n.id], isGoal = goals.has(n.id);
     const circ = document.createElementNS(SVG, "circle");
-    circ.setAttribute("cx", p.x); circ.setAttribute("cy", p.y);
-    circ.setAttribute("r", 15);
-    const isGoal = goals.has(n.id);
+    circ.setAttribute("cx", p.x); circ.setAttribute("cy", p.y); circ.setAttribute("r", R);
     circ.setAttribute("fill", isGoal ? "#3fb950" : "#21262d");
     circ.setAttribute("stroke", "#30363d");
-    grid.appendChild(circ);
-
+    svgEl.appendChild(circ);
     const t = document.createElementNS(SVG, "text");
     t.setAttribute("x", p.x); t.setAttribute("y", p.y + 3);
     t.setAttribute("fill", isGoal ? "#04101f" : "#8b98a5");
-    t.setAttribute("font-size", "9");
-    t.setAttribute("text-anchor", "middle");
-    t.textContent = isGoal ? "G" : n.id;
-    grid.appendChild(t);
+    t.setAttribute("font-size", fs); t.setAttribute("text-anchor", "middle");
+    t.textContent = isGoal ? "G" : (n.id === m.start ? "S" : n.id);
+    svgEl.appendChild(t);
   });
 
-  // agent marker
   const start = nodePos[m.start];
   const agent = document.createElementNS(SVG, "circle");
-  agent.setAttribute("id", "agent");
+  agent.setAttribute("class", "agent-marker");
   agent.setAttribute("cx", start.x); agent.setAttribute("cy", start.y);
-  agent.setAttribute("r", 11);
+  agent.setAttribute("r", interactive ? 11 : 8);
   agent.setAttribute("fill", "#58a6ff");
-  agent.setAttribute("stroke", "#04101f");
-  agent.setAttribute("stroke-width", 2);
-  grid.appendChild(agent);
+  agent.setAttribute("stroke", "#04101f"); agent.setAttribute("stroke-width", 2);
+  svgEl.appendChild(agent);
+
+  return { nodePos, edgeEls, agentEl: agent, svgEl };
 }
+
+function ekey(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
+const $ = id => document.getElementById(id);
+function setBadge(el, cls, txt) { el.className = "badge " + cls; el.textContent = txt; }
+
+// ---- tab switching ------------------------------------------------------
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => activateTab(tab.dataset.view));
+});
+function activateTab(view) {
+  document.querySelectorAll(".tab").forEach(t =>
+    t.classList.toggle("active", t.dataset.view === view));
+  document.querySelectorAll(".view").forEach(v =>
+    v.classList.toggle("active", v.id === "view-" + view));
+}
+
+// ---- state --------------------------------------------------------------
+let allMaps = [];        // serialised benchmark maps
+let focusCtx = null;     // render context for the focus map
+let focusMapIndex = 0;
+let currentRuns = [];    // runs for the focused map
+let runFilter = "all";
+let activeEpisode = null;
+
+// ============================ RESULTS ============================
+socket.on("results", payload => {
+  const host = $("resultsHost");
+  host.innerHTML = "";
+  if (!payload.db || payload.results.every(r => r.conditions.length === 0)) {
+    host.innerHTML = `<div class="empty">No trials.db found (or it is empty).<br>
+      Run <code>python tests/evaluate.py</code> from the repo root to generate it,
+      then reload.</div>`;
+    return;
+  }
+  payload.results.forEach(block => {
+    if (!block.conditions.length) return;
+    const div = document.createElement("div");
+    div.className = "res-block";
+    let rows = block.conditions.map(c => {
+      const cls = c.label.includes("Macro") ? "cond-macro" : "cond-prim";
+      return `<tr class="${cls}">
+        <td>${c.label}</td>
+        <td>${c.success.toFixed(1)}%</td>
+        <td>${c.replans.toFixed(2)}</td>
+        <td>${c.actions.toFixed(2)}</td>
+        <td>${c.decisions.toFixed(2)}</td>
+        <td>${c.plan.toFixed(3)}</td>
+        <td>${c.n}</td></tr>`;
+    }).join("");
+    div.innerHTML = `<h3>${block.name}</h3>
+      <table>
+        <thead><tr><th>Condition</th><th>Success</th><th>Replans</th>
+          <th>Actions</th><th>Decisions</th><th>Plan(s)</th><th>n</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    host.appendChild(div);
+  });
+});
+
+// ============================ MAPS GALLERY ============================
+socket.on("maps_all", payload => {
+  allMaps = payload.maps;
+  const g = $("gallery");
+  g.innerHTML = "";
+  allMaps.forEach(m => {
+    const card = document.createElement("div");
+    card.className = "map-card";
+    card.innerHTML = `<div class="title">${m.name}</div>
+      <svg></svg>
+      <div class="hint">click to focus & replay runs →</div>`;
+    g.appendChild(card);
+    renderMap(card.querySelector("svg"), m, { maxSize: 320, interactive: false });
+    card.addEventListener("click", () => openFocus(m.index));
+  });
+});
+
+// ============================ FOCUS ============================
+function openFocus(index) {
+  focusMapIndex = index;
+  const m = allMaps[index];
+  $("focusTitle").textContent = m.name;
+  focusCtx = renderMap($("focusGrid"), m, { maxSize: 560, interactive: true });
+  activateTab("focus");
+  resetReplayPanel();
+  socket.emit("select_map", { map_index: index });
+}
+$("backToMaps").addEventListener("click", () => activateTab("maps"));
+
+function resetReplayPanel() {
+  setBadge($("condBadge"), "idle", "no run selected");
+  setBadge($("runBadge"), "idle", "idle");
+  $("mActions").textContent = "0"; $("mReplans").textContent = "0";
+  $("mDecisions").textContent = "0"; $("mPos").textContent = "—";
+  $("statusLine").textContent = "";
+}
+
+socket.on("runs_list", payload => {
+  if (payload.map_index !== focusMapIndex) return;
+  currentRuns = payload.runs;
+  renderRunsList();
+});
+
+document.querySelectorAll(".chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    runFilter = chip.dataset.filter;
+    renderRunsList();
+  });
+});
+
+function renderRunsList() {
+  const list = $("runsList");
+  list.innerHTML = "";
+  const runs = currentRuns.filter(r => {
+    if (runFilter === "primitive") return !r.condition.includes("Macro");
+    if (runFilter === "macro") return r.condition.includes("Macro");
+    if (runFilter === "fail") return !r.reached_goal;
+    return true;
+  });
+  if (!runs.length) {
+    list.innerHTML = `<div class="empty" style="padding:14px">No runs match.</div>`;
+    return;
+  }
+  runs.forEach(r => {
+    const item = document.createElement("div");
+    item.className = "run-item" + (r.episode_id === activeEpisode ? " active" : "");
+    const tag = r.condition.includes("Macro") ? "M" : "P";
+    item.innerHTML = `
+      <span class="res ${r.reached_goal ? 'ok' : 'bad'}">${r.reached_goal ? '✓' : '✗'}</span>
+      <span class="seed">${tag} · #${r.seed}</span>
+      <span class="stat">${r.actions}a · ${r.replans}r · ${r.decisions}d</span>`;
+    item.addEventListener("click", () => {
+      activeEpisode = r.episode_id;
+      renderRunsList();
+      startReplay(r);
+    });
+    list.appendChild(item);
+  });
+}
+
+function startReplay(r) {
+  setBadge($("condBadge"), r.condition.includes("Macro") ? "macro" : "primitive", r.condition);
+  setBadge($("runBadge"), "run", "replaying…");
+  $("statusLine").textContent = `seed #${r.seed} — replaying recorded trajectory`;
+  socket.emit("replay", {
+    episode_id: r.episode_id,
+    map_index: focusMapIndex,
+    delay: +$("speed").value,
+  });
+}
+
+// ---- replay animation (focus map) --------------------------------------
+$("speed").addEventListener("input", e =>
+  $("speedVal").textContent = (+e.target.value).toFixed(2) + "s");
 
 function moveAgent(id) {
-  const p = nodePos[id], a = document.getElementById("agent");
-  if (p && a) { a.setAttribute("cx", p.x); a.setAttribute("cy", p.y); }
+  if (!focusCtx) return;
+  const p = focusCtx.nodePos[id];
+  if (p && focusCtx.agentEl) {
+    focusCtx.agentEl.setAttribute("cx", p.x);
+    focusCtx.agentEl.setAttribute("cy", p.y);
+  }
 }
-
 function drawPlanRoad(planIds, kind) {
-  const road = document.getElementById("planRoad");
+  const road = focusCtx && focusCtx.svgEl.querySelector("#planRoad");
   if (!road) return;
-  const pts = planIds.map(id => nodePos[id]).filter(Boolean)
-                      .map(p => `${p.x},${p.y}`).join(" ");
+  const pts = planIds.map(id => focusCtx.nodePos[id]).filter(Boolean)
+                     .map(p => `${p.x},${p.y}`).join(" ");
   road.setAttribute("points", pts);
   road.setAttribute("stroke", kind === "macro" ? "#c678dd" : "#58a6ff");
   road.setAttribute("opacity", planIds.length > 1 ? "0.35" : "0");
 }
 
-// ---- live metrics & controls -------------------------------------------
-const $ = id => document.getElementById(id);
-function setBadge(el, cls, txt) { el.className = "badge " + cls; el.textContent = txt; }
-
-$("speed").addEventListener("input", e =>
-  $("speedVal").textContent = (+e.target.value).toFixed(2) + "s");
-
-$("mapSel").addEventListener("change", () =>
-  socket.emit("preview", { map_index: +$("mapSel").value }));
-
-let running = false;
-$("runBtn").addEventListener("click", () => {
-  if (running) return;
-  socket.emit("run", {
-    map_index: +$("mapSel").value,
-    condition: $("condSel").value,
-    seed: +$("seed").value,
-    delay: +$("speed").value,
-  });
+socket.on("map", m => {
+  // a fresh copy of the focus map (resets door colours before replay)
+  if (m.index === focusMapIndex) {
+    focusCtx = renderMap($("focusGrid"), m, { maxSize: 560, interactive: true });
+  }
 });
 
-// ---- results table ------------------------------------------------------
-const agg = {};   // label -> {n, goals, act, rep, dec, plan}
-function addResult(d) {
-  const tb = $("resBody");
-  const tr = document.createElement("tr");
-  tr.innerHTML = `<td>${d.condition}</td>
-    <td class="${d.reached_goal ? 'goal-yes' : 'goal-no'}">${d.reached_goal ? '✓' : '✗'}</td>
-    <td>${d.actions_taken}</td><td>${d.replans}</td>
-    <td>${d.decisions}</td><td>${d.planning_time.toFixed(3)}</td>`;
-  tb.prepend(tr);
-
-  const a = agg[d.condition] || (agg[d.condition] = {n:0,goals:0,act:0,rep:0,dec:0,plan:0});
-  a.n++; a.goals += d.reached_goal ? 1 : 0;
-  a.act += d.actions_taken; a.rep += d.replans;
-  a.dec += d.decisions; a.plan += d.planning_time;
-  renderFoot();
-}
-function renderFoot() {
-  const ft = $("resFoot"); ft.innerHTML = "";
-  Object.entries(agg).forEach(([label, a]) => {
-    const tr = document.createElement("tr");
-    tr.style.color = "#e6edf3"; tr.style.fontWeight = "700";
-    tr.innerHTML = `<td>${label} avg (n=${a.n})</td>
-      <td>${(100*a.goals/a.n).toFixed(0)}%</td>
-      <td>${(a.act/a.n).toFixed(1)}</td><td>${(a.rep/a.n).toFixed(1)}</td>
-      <td>${(a.dec/a.n).toFixed(1)}</td><td>${(a.plan/a.n).toFixed(3)}</td>`;
-    ft.appendChild(tr);
-  });
-}
-$("clearBtn").addEventListener("click", () => {
-  $("resBody").innerHTML = ""; $("resFoot").innerHTML = "";
-  for (const k in agg) delete agg[k];
-});
-
-// ---- socket events ------------------------------------------------------
-socket.on("map", renderMap);
-
-socket.on("episode_start", d => {
-  running = true; $("runBtn").disabled = true;
-  setBadge($("condBadge"), d.condition.includes("Macro") ? "macro" : "primitive",
-           d.condition);
-  setBadge($("runBadge"), "run", "running");
+socket.on("replay_start", d => {
   $("mActions").textContent = "0"; $("mReplans").textContent = "0";
   $("mDecisions").textContent = "0"; $("mPos").textContent = d.start;
-  $("statusLine").textContent = `seed ${d.seed} · goal ${d.goals.join(", ")}`;
   moveAgent(d.start);
 });
 
@@ -329,40 +465,36 @@ socket.on("step", d => {
   $("mDecisions").textContent = d.decisions;
   $("mPos").textContent = d.current;
 
-  // colour the attempted door
-  const el = edgeEls[ekey(d.source, d.target)];
-  if (el) {
-    el.setAttribute("stroke", d.success ? "#3fb950" : "#f85149");
-    el.setAttribute("stroke-width", 6);
+  if (focusCtx) {
+    const el = focusCtx.edgeEls[ekey(d.source, d.target)];
+    if (el) {
+      el.setAttribute("stroke", d.success ? "#3fb950" : "#f85149");
+      el.setAttribute("stroke-width", 6);
+    }
+    d.failed_doors.forEach(([u, v]) => {
+      const fe = focusCtx.edgeEls[ekey(u, v)];
+      if (fe) { fe.setAttribute("stroke", "#6e7681");
+                fe.setAttribute("stroke-dasharray", "5,5");
+                fe.setAttribute("stroke-width", 3); }
+    });
   }
-  // permanently grey out every locked door
-  d.failed_doors.forEach(([u, v]) => {
-    const fe = edgeEls[ekey(u, v)];
-    if (fe) { fe.setAttribute("stroke", "#6e7681");
-              fe.setAttribute("stroke-dasharray", "5,5");
-              fe.setAttribute("stroke-width", 3); }
-  });
-
   drawPlanRoad(d.plan, d.action_kind);
   $("statusLine").textContent =
     `${d.action_kind === "macro" ? "macro road" : "primitive step"}: `
     + `${d.source} → ${d.target} ${d.success ? "✓ opened" : "✗ locked"}`;
 });
 
-socket.on("episode_done", d => {
-  running = false; $("runBtn").disabled = false;
+socket.on("replay_done", d => {
   setBadge($("runBadge"), d.reached_goal ? "run" : "idle",
            d.reached_goal ? "reached goal" : "stuck");
   drawPlanRoad([], "primitive");
   $("statusLine").textContent =
     `done — ${d.reached_goal ? "reached goal" : "gave up"} in `
-    + `${d.actions_taken} actions, ${d.decisions} decisions, `
-    + `${d.planning_time.toFixed(3)}s planning`;
-  addResult(d);
+    + `${d.actions_taken} actions, ${d.replans} replans, ${d.decisions} decisions`;
 });
 
-// initial preview
-socket.emit("preview", { map_index: 0 });
+// ---- boot ---------------------------------------------------------------
+socket.emit("load");
 </script>
 </body>
 </html>
