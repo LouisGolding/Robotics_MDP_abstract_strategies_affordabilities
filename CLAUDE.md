@@ -14,6 +14,8 @@ We're extending abstract strategies and affordances (from Khen's published resea
 
 **Environment.** Static, non-deterministic navigation with repeatable structure. Rooms connected by doors. Each door has a known open-probability. **One attempt per door** — no retries (retries would make the env dynamic). No keys. No temporally-extended goals. Goal = reach a target state with confidence ≥ α.
 
+**Static-door semantics (enforced in code — do not regress).** Each door's state is decided exactly once, on the first attempt. Open → stays open forever (probability 1, no re-roll on later crossings). Closed → permanently locked for this episode (retry raises `ValueError`). `GridWorld` tracks `opened_doors` and `failed_doors`; the MCTS planner threads both sets through its world model. `tests/test_environment.py` guards this invariant.
+
 **Approach.** Online MDP planning. We implement our own planner (MCTS-style, off-the-shelf is fine, need not be SOTA). We integrate strategy/affordance concepts from the papers into it. Plan → act → observe → replan. Strategies replace random expansion with experience-informed expansion.
 
 **Scope.** Strategies are assumed given (no grounding/reconstruction for now). Stay at task-level abstraction. Lifelong library is the vision but start with a fixed set.
@@ -196,6 +198,7 @@ tree search over available moves.
 | 1 | GridWorld env + online loop + ReliablePathPlanner oracle | ✅ Done |
 | 2 | MCTSPlanner (UCT) + primitive actions — "MDP alone" baseline; validate against Dijkstra oracle | ✅ Done |
 | 2b | Evaluation harness (`tests/evaluate.py`) — fixed benchmark maps, side-by-side comparison table | ✅ Done |
+| 2c | SQLite trace store (`mdp_nav/trace_store.py`) + 3-tab dashboard (Results / Maps / Focus) + static-door bug fix + regression suite (`tests/test_environment.py`) | ✅ Done |
 | 3 | Macro-actions / options — second evaluation condition (+ live web dashboard) | ✅ Done |
 | 4 | Abstract strategies — third evaluation condition | ⬜ Next |
 | 5 | Affordance module — rank/select applicable strategies; add reliability score | ⬜ |

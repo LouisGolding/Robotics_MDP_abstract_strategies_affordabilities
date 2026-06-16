@@ -12,7 +12,7 @@
 
 ## ⚠ CANONICAL — current state of truth
 
-*Last updated: 04 Jun 2026*
+*Last updated: 16 Jun 2026*
 
 **Environment.** A static, non‑deterministic navigation environment with repeatable structure (rooms connected by doors). Each door has a known probability of opening. **One attempt per door** — a failed door is not retried; the planner routes around it. No keys, no temporally‑extended goals. Goal = reach a target state with confidence ≥ α (e.g. 0.80).
 
@@ -34,6 +34,7 @@
 
 | Date | What changed | Why |
 |---|---|---|
+| 16 Jun 2026 | **Static-door bug fixed** in `environment.py` + `planner.py`; old `results/trials.db` deleted and regenerated; regression suite `tests/test_environment.py` added; SQLite trace store (`mdp_nav/trace_store.py`) and 3-tab dashboard added | See Journal 2026-06-16 |
 | 11 Jun 2026 | Phase 3 done: macro‑actions wired into the shared MCTSPlanner (+ `decisions` metric, `max_macro_length` knob) and a live Flask/Socket.IO dashboard. Outer loop generalised once (backward‑compatibly) to commit to multi‑hop plans | See Journal 2026‑06‑11. Macros cut planning decisions/time sharply at a small success cost — the gap Phase 4/5 strategies+reliability are meant to close |
 | 04 Jun 2026 | CLAUDE.md affordance wording corrected to match canon (rank/select strategies, not filter actions); roadmap split so MCTS‑with‑primitives is its own step before macro‑actions | Doc realignment to the 04 Jun decisions; underlying decision already in the 04 Jun Journal entry |
 | 04 Jun 2026 | Locked: all three eval conditions use the SAME MCTS planner; Dijkstra is scaffolding/oracle only, never a condition | Controlled experiment — avoid the planner-vs-moves confound. See Journal 2026‑06‑04 |
@@ -55,6 +56,36 @@
 ## Development Journal
 
 *Rich, dated entries capturing discussions, debates, and reasoning — including paths not taken. This is the raw material for the thesis writeup (especially "background," "method justification," and "alternatives considered"). Append new entries at the top.*
+
+### 2026-06-16 — Static-door bug fixed; SQLite trace store + 3-tab dashboard added
+
+**The bug.** `GridWorld.step()` was re-sampling `random() < p` on *every* traversal of a door — including doors the agent had already successfully crossed. This violated the canonical one-try-per-door rule: a door that opened at step 3 could "re-close" at step 9, making the environment secretly dynamic. The symptom that exposed it: in a recorded trajectory, door `(0,2)↔(1,2)` (prob 0.95) succeeded three times then failed on the fourth crossing.
+
+**The fix — `environment.py`.** Added `opened_doors: Set[FrozenSet]` alongside the existing `failed_doors` set. `reset()` clears both. `step()` now:
+1. If `key ∈ opened_doors` → `success = True` (no re-roll, cost-free certainty).
+2. If `key ∈ failed_doors` → raise `ValueError` (locked, no retry — pre-existing behaviour).
+3. Otherwise → sample once; latch into `opened_doors` or `failed_doors`.
+Added `is_open(a, b)` helper alongside the existing `is_failed()`.
+
+**The fix — `planner.py`.** The MCTS world model inside `plan()` had the same gap: simulated door traversals in `_apply_action` and `_simulate` were re-rolling for already-opened doors. Fixed by threading an `opened` set through all four UCT phases (root seeded from `env.opened_doors`; child nodes inherit `new_opened`; rollouts maintain a local `opened` dict). `_UCTNode.__slots__` gained an `opened_doors` slot.
+
+**Why this matters for results.** Under the bug, the effective per-door success probability was lower than the stated `p` because re-rolls on already-opened doors could drop success. Agents appeared to replan more than the environment actually warranted. All episode data recorded before this fix is stale; `results/trials.db` was deleted and regenerated with the corrected code.
+
+**Regression suite — `tests/test_environment.py`.** Three tests added to guard against regressions:
+- `test_opened_door_stays_open`: bounces across the same opened door 200 times; asserts every traversal succeeds.
+- `test_closed_door_stays_closed`: confirms a prob-0 door fails on first attempt and that retrying raises `ValueError`.
+- `test_opened_and_failed_sets_disjoint`: runs 20 full episodes and asserts `opened_doors ∩ failed_doors = ∅` throughout.
+
+**SQLite trace store — `mdp_nav/trace_store.py`.** Added a passive observer (`TraceRecorder`) that hooks into `run_episode(step_callback=…)`. Three-table schema: `runs` (config snapshot including resolved per-door probs), `episodes` (summary metrics), `steps` (one row per door attempt). Wired into `tests/evaluate.py` behind `PERSIST_TRACES = True` → `results/trials.db` (gitignored, generated artifact).
+
+**3-tab dashboard — `dashboard/app.py` + `index.html`.** Complete rewrite of the web frontend:
+- *Results tab*: aggregated side-by-side comparison table (mirrors `evaluate.py` output).
+- *Maps tab*: gallery of all 4 benchmark mazes, clickable.
+- *Focus tab*: enlarged SVG maze + scrollable run list with filter chips (All / Primitive / Macro / Failures); clicking a run animates the stored trajectory step-by-step from the DB.
+
+**Episode audit tool — `tests/inspect_episode.py`.** CLI tool that prints a full trajectory with door probs and `<-- replan` markers, plus a coherence summary. Usage: `python tests/inspect_episode.py --map 6x6 --cond primitive --seed 8`.
+
+**UCT rollout quality (NOT a bug — documented for thesis).** ~25% of first moves in vanilla UCT go in a suboptimal direction because uniform-random rollouts don't distinguish goal-direction well. This is a known finite-sample weakness of textbook UCT (Kocsis & Szepesvári 2006) — not a defect in our implementation. Kept as-is: it is a citeable baseline and the wandering is honest motivation for Phase 4/5 (strategies + reliability affordances guide expansion instead of random rollouts).
 
 ### 2026‑06‑11 — Phase 3 implemented: macro‑actions + live dashboard
 
