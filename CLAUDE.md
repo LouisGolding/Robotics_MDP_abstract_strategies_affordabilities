@@ -1,5 +1,7 @@
 # Robotics MDP Abstract Strategies & Affordabilities
 
+> ⚠ **Before finalizing any code or direction decision, run `../../PROJECT_GUARDRAILS.md`** — the project's fundamentals + pre-flight checklist. It takes priority over everything else, including the canonical decisions below.
+
 > **For Claude Code sessions** — canonical decisions in this section override everything below.
 
 ## What this project is
@@ -191,6 +193,19 @@ tree search over available moves.
 
 ---
 
+## Foundational priority (corrected 09 Jun 2026) — read before adding phases
+
+The intended foundation order is: **(1) a simple, referenced MDP algorithm → (2) a general store for
+trials (states, actions, moves, outcomes) → (3) macro-actions, then abstract strategies → (4) affordances
+last.** Item (1) is done (MCTS/UCT). Item (2) — a **trial/trace data store** — is a logged Meeting-2
+instruction from Khen ("keep traces of states… leverage this *database* of states") and is **not yet
+built**; it should have come *before* macro-actions. **Backfill it now (see `TODO.md` → P0) before
+starting Phase 4.** Everything downstream (strategies, the lifelong library, ACSD-style extraction) reads
+from this store, and without it our benchmark trajectories are not persisted/auditable.
+
+Open correctness items (config consolidation, the two diverged `PROJECT_LOG.md` files, the stale
+`CODE_GUIDE.md`) are tracked in `TODO.md`.
+
 ## Development Roadmap
 
 | Phase | Content | Status |
@@ -200,7 +215,8 @@ tree search over available moves.
 | 2b | Evaluation harness (`tests/evaluate.py`) — fixed benchmark maps, side-by-side comparison table | ✅ Done |
 | 2c | SQLite trace store (`mdp_nav/trace_store.py`) + 3-tab dashboard (Results / Maps / Focus) + static-door bug fix + regression suite (`tests/test_environment.py`) | ✅ Done |
 | 3 | Macro-actions / options — second evaluation condition (+ live web dashboard) | ✅ Done |
-| 4 | Abstract strategies — third evaluation condition | ⬜ Next |
+| **P0** | **Trial/trace data store (the "database of states") — passive logging of every run's states/actions/outcomes** | ⬜ **Do next (foundational backfill)** |
+| 4 | Abstract strategies — third evaluation condition | ⬜ |
 | 5 | Affordance module — rank/select applicable strategies; add reliability score | ⬜ |
 | 6 | Final evaluation run across all conditions | ⬜ |
 
